@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>⚡ Pikachu Hologram AR — Vibe Coding School</title>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+  }
+}
+</script>
+
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --pkmn-yellow: #FFCB05;
+    --pkmn-red: #EE1515;
+    --pkmn-blue: #3B4CCA;
+    --pkmn-gold: #B3A125;
+    --electric: #FFEE00;
+    --ink: #222224;
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: 'Trebuchet MS', sans-serif;
+    color: #fff;
+  }
+
+  /* ===== START SCREEN ===== */
+  #start-screen {
+    position: fixed; inset: 0; z-index: 100;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(255,203,5,0.25), transparent 50%),
+      radial-gradient(circle at 80% 70%, rgba(238,21,21,0.2), transparent 50%),
+      linear-gradient(180deg, #1a1a2e 0%, #0a0a18 100%);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 24px; text-align: center;
+    transition: opacity 0.6s ease;
+  }
+  #start-screen.hidden { opacity: 0; pointer-events: none; }
+
+  /* Pokéball 로고 */
+  .pokeball {
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #fff 0%, #fff 49%, var(--ink) 49%, var(--ink) 51%, var(--pkmn-red) 51%, var(--pkmn-red) 100%);
+    border: 5px solid var(--ink);
+    position: relative;
+    margin-bottom: 24px;
+    box-shadow:
+      0 16px 50px rgba(238,21,21,0.5),
+      0 0 0 3px rgba(255,203,5,0.4),
+      inset -10px -10px 25px rgba(0,0,0,0.2);
+    animation: pokeballBob 3s ease-in-out infinite;
+  }
+  .pokeball::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 30px; height: 30px;
+    background: #fff;
+    border: 5px solid var(--ink);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: inset 0 0 0 3px #fff, 0 0 20px rgba(255,238,0,0.6);
+  }
+  @keyframes pokeballBob {
+    0%, 100% { transform: translateY(0) rotate(-8deg); }
+    50% { transform: translateY(-12px) rotate(8deg); }
+  }
+
+  h1 {
+    font-size: clamp(36px, 9vw, 64px);
+    font-weight: 900;
+    letter-spacing: -1px;
+    background: linear-gradient(180deg, var(--pkmn-yellow) 0%, var(--pkmn-gold) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 4px 30px rgba(255,203,5,0.4);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    -webkit-text-stroke: 1px rgba(0,0,0,0.3);
+  }
+  .subtitle {
+    font-size: 13px;
+    letter-spacing: 6px;
+    color: var(--pkmn-yellow);
+    text-transform: uppercase;
+    margin-bottom: 32px;
+    font-weight: 700;
+    opacity: 0.8;
+  }
+
+  .instructions {
+    background: rgba(255,255,255,0.04);
+    border: 2px solid var(--pkmn-yellow);
+    border-radius: 16px;
+    padding: 20px 24px;
+    max-width: 360px;
+    margin-bottom: 32px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 0 30px rgba(255,203,5,0.15);
+  }
+  .instructions ol { list-style: none; text-align: left; }
+  .instructions li {
+    padding: 6px 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: rgba(255,255,255,0.9);
+    display: flex; gap: 12px;
+    align-items: flex-start;
+  }
+  .instructions .num {
+    flex-shrink: 0;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: var(--pkmn-yellow);
+    color: var(--ink);
+    font-weight: 900;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 12px rgba(255,203,5,0.6);
+  }
+
+  .start-btn {
+    background: linear-gradient(180deg, var(--pkmn-yellow) 0%, #d9a704 100%);
+    color: var(--ink);
+    border: 3px solid var(--ink);
+    padding: 18px 48px;
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow:
+      0 8px 24px rgba(255,203,5,0.5),
+      inset 0 -4px 0 rgba(0,0,0,0.2);
+    transition: all 0.2s;
+  }
+  .start-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(255,203,5,0.7);
+  }
+  .start-btn:active:not(:disabled) { transform: translateY(2px); }
+  .start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .target-info {
+    margin-top: 24px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 1px;
+    max-width: 320px;
+    line-height: 1.5;
+  }
+  .target-info strong { color: var(--pkmn-yellow); }
+
+  #ar-container { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+
+  /* ===== AR UI ===== */
+  #ar-ui {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 50;
+    padding: 16px;
+    display: none;
+    pointer-events: none;
+  }
+  #ar-ui.active { display: flex; justify-content: space-between; align-items: center; }
+
+  .badge {
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(10px);
+    border: 2px solid var(--pkmn-yellow);
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    pointer-events: auto;
+    color: var(--pkmn-yellow);
+    box-shadow: 0 0 20px rgba(255,203,5,0.3);
+  }
+  .badge.live::before {
+    content: '⚡';
+    margin-right: 6px;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .stop-btn {
+    background: var(--pkmn-red);
+    color: #fff;
+    border: 2px solid #fff;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    pointer-events: auto;
+    box-shadow: 0 0 16px rgba(238,21,21,0.5);
+  }
+
+  /* ===== SCAN HINT ===== */
+  #scan-hint {
+    position: fixed;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(10px);
+    padding: 12px 22px;
+    border: 2px solid var(--pkmn-yellow);
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 900;
+    color: var(--pkmn-yellow);
+    display: none;
+    text-align: center;
+    box-shadow: 0 0 30px rgba(255,203,5,0.4);
+    white-space: nowrap;
+    letter-spacing: 1px;
+  }
+  #scan-hint.active { display: block; animation: hintPulse 1.5s ease-in-out infinite; }
+  @keyframes hintPulse {
+    0%,100% { box-shadow: 0 0 30px rgba(255,203,5,0.4); }
+    50%     { box-shadow: 0 0 60px rgba(255,203,5,0.8); }
+  }
+
+  /* ===== ATTACK BUTTON ===== */
+  #attack-btn {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    background: linear-gradient(180deg, var(--pkmn-yellow) 0%, #d9a704 100%);
+    color: var(--ink);
+    border: 3px solid var(--ink);
+    padding: 18px 32px;
+    border-radius: 999px;
+    font-size: 16px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    pointer-events: auto;
+    display: none;
+    box-shadow: 0 8px 24px rgba(255,203,5,0.6), inset 0 -4px 0 rgba(0,0,0,0.2);
+    transition: transform 0.1s;
+  }
+  #attack-btn.active { display: block; }
+  #attack-btn:active { transform: translateX(-50%) translateY(2px) scale(0.98); }
+  #attack-btn::before { content: '⚡ '; }
+  #attack-btn::after { content: ' ⚡'; }
+
+  /* ===== HP BAR (Pokémon battle style) ===== */
+  #hp-bar {
+    position: fixed;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 49;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(10px);
+    border: 2px solid var(--pkmn-yellow);
+    border-radius: 8px;
+    padding: 10px 16px;
+    min-width: 240px;
+    display: none;
+    box-shadow: 0 0 20px rgba(255,203,5,0.3);
+  }
+  #hp-bar.active { display: block; }
+  .hp-name {
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    color: var(--pkmn-yellow);
+    margin-bottom: 6px;
+  }
+  .hp-track {
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+  .hp-fill {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #00ff66, #00cc44);
+    transition: width 0.3s;
+  }
+
+  /* ===== STATUS OVERLAY ===== */
+  #status-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.95);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+  }
+  #status-overlay.active { display: flex; }
+  .status-card {
+    background: rgba(255,255,255,0.04);
+    border: 2px solid var(--pkmn-yellow);
+    border-radius: 16px;
+    padding: 28px;
+    max-width: 380px;
+  }
+  .status-card h3 { font-size: 18px; margin-bottom: 12px; color: var(--pkmn-yellow); letter-spacing: 1px; }
+  .status-card p { font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.85); }
+  .status-card code {
+    background: rgba(255,203,5,0.15);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--pkmn-yellow);
+  }
+  .status-card button {
+    margin-top: 20px;
+    background: var(--pkmn-yellow);
+    color: var(--ink);
+    border: none;
+    padding: 10px 28px;
+    border-radius: 999px;
+    font-weight: 900;
+    cursor: pointer;
+    letter-spacing: 2px;
+  }
+
+  .spinner {
+    width: 44px; height: 44px;
+    border: 3px solid rgba(255,203,5,0.15);
+    border-top-color: var(--pkmn-yellow);
+    border-radius: 50%;
+    margin: 0 auto 16px;
+    animation: spin 0.8s linear infinite;
+    box-shadow: 0 0 20px rgba(255,203,5,0.4);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .progress-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--pkmn-yellow), var(--electric));
+    transition: width 0.3s;
+    box-shadow: 0 0 10px var(--electric);
+  }
+</style>
+</head>
+<body>
+
+<div id="start-screen">
+  <div class="pokeball"></div>
+  <h1>PIKACHU AR</h1>
+  <div class="subtitle">⚡ Hologram Summon System ⚡</div>
+
+  <div class="instructions">
+    <ol>
+      <li><span class="num">1</span><span>업로드한 <strong>Pikachu 카드</strong>를 다른 화면에 띄우거나 인쇄</span></li>
+      <li><span class="num">2</span><span>SUMMON 누르고 카메라 권한 허용</span></li>
+      <li><span class="num">3</span><span>카드를 비추면 홀로그램 피카츄가 등장!</span></li>
+      <li><span class="num">4</span><span>화면 하단의 <strong>⚡THUNDER PUNCH⚡</strong> 버튼으로 공격</span></li>
+    </ol>
+  </div>
+
+  <button class="start-btn" id="start-btn" disabled>LOADING...</button>
+  <div class="target-info">
+    <strong>⚠ 사용 환경:</strong> 카메라가 필요한 AR 앱이라 <code>https://</code> 또는 <code>localhost</code> 서버로 띄워주세요. <code>file://</code>로 열면 카메라가 안 잡힙니다.
+  </div>
+</div>
+
+<div id="ar-container"></div>
+
+<div id="ar-ui">
+  <div class="badge live">PIKACHU LIVE</div>
+  <button class="stop-btn" id="stop-btn">EXIT</button>
+</div>
+
+<div id="hp-bar">
+  <div class="hp-name">⚡ PIKACHU · HP 60/60</div>
+  <div class="hp-track"><div class="hp-fill" id="hp-fill"></div></div>
+</div>
+
+<div id="scan-hint">📷 PIKACHU 카드를 비춰주세요</div>
+
+<button id="attack-btn">THUNDER PUNCH</button>
+
+<div id="status-overlay" class="active">
+  <div class="status-card" id="status-content">
+    <div class="spinner"></div>
+    <h3>SYSTEM BOOTING...</h3>
+    <p>MindAR + Three.js 로딩 중</p>
+    <div class="progress-bar"><div class="progress-fill" id="boot-progress"></div></div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MindARThree } from 'mindar-image-three';
+
+const startScreen = document.getElementById('start-screen');
+const startBtn    = document.getElementById('start-btn');
+const stopBtn     = document.getElementById('stop-btn');
+const attackBtn   = document.getElementById('attack-btn');
+const arUI        = document.getElementById('ar-ui');
+const scanHint    = document.getElementById('scan-hint');
+const hpBar       = document.getElementById('hp-bar');
+const statusOv    = document.getElementById('status-overlay');
+const statusContent = document.getElementById('status-content');
+
+let mindarThree = null;
+let pikachuModel = null;
+let mixer = null;
+let punchAction = null;
+const electricBolts = []; // 활성 전기 번개들
+let isAttacking = false;
+
+function showStatus(html) {
+  statusContent.innerHTML = html;
+  statusOv.classList.add('active');
+}
+function showError(title, msg) {
+  statusContent.innerHTML = `<h3 style="color: #ff5577">⚠ ${title}</h3><p>${msg}</p><button onclick="location.reload()">RETRY</button>`;
+  statusOv.classList.add('active');
+}
+function hideStatus() { statusOv.classList.remove('active'); }
+
+if (typeof MindARThree !== 'function') {
+  showError('LIBRARY LOAD FAILED', 'MindAR 엔진을 불러올 수 없습니다. 인터넷 연결을 확인해주세요.');
+} else {
+  hideStatus();
+  startBtn.disabled = false;
+  startBtn.textContent = '⚡ SUMMON ⚡';
+  console.log('✅ MindAR loaded');
+}
+
+// =========================================
+// 🌟 HOLOGRAM SHADER (전기 효과 강화 버전)
+// =========================================
+function createHologramMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime:    { value: 0 },
+      uOpacity: { value: 0 },
+      uAttack:  { value: 0 }, // 공격 시 0→1로 펄스
+    },
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vViewDir;
+      varying vec3 vWorldPos;
+      uniform float uTime;
+      uniform float uAttack;
+
+      void main() {
+        vec3 pos = position;
+        // 글리치 떨림 (공격 시 더 강해짐)
+        float glitch = step(0.97, sin(uTime * 30.0 + position.y * 50.0) * 0.5 + 0.5);
+        pos.x += glitch * (sin(uTime * 100.0) * (0.005 + uAttack * 0.02));
+        pos.y += uAttack * sin(uTime * 60.0 + position.x * 20.0) * 0.005;
+
+        vec4 worldPos = modelMatrix * vec4(pos, 1.0);
+        vWorldPos = worldPos.xyz;
+        vNormal = normalize(normalMatrix * normal);
+        vViewDir = normalize(cameraPosition - worldPos.xyz);
+
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vNormal;
+      varying vec3 vViewDir;
+      varying vec3 vWorldPos;
+      uniform float uTime;
+      uniform float uOpacity;
+      uniform float uAttack;
+
+      void main() {
+        // Fresnel rim
+        float fresnel = 1.0 - max(dot(vNormal, vViewDir), 0.0);
+        fresnel = pow(fresnel, 1.5);
+
+        // 가로 스캔라인
+        float scanline = sin(vWorldPos.y * 60.0 - uTime * 4.0) * 0.5 + 0.5;
+        scanline = pow(scanline, 4.0);
+
+        // 흐르는 띠
+        float band = smoothstep(0.93, 1.0, sin(vWorldPos.y * 3.0 - uTime * 1.2) * 0.5 + 0.5);
+
+        // 깜빡임
+        float flicker = 0.92 + 0.08 * sin(uTime * (20.0 + uAttack * 50.0));
+
+        // 피카츄 노란색 (더 진하게)
+        vec3 baseColor = vec3(1.0, 0.78, 0.0);   // 진한 피카츄 노랑
+        vec3 rimColor = vec3(1.0, 1.0, 0.6);     // 가장자리 밝은 노랑
+        vec3 attackWhite = vec3(1.0, 1.0, 0.9);
+
+        // 베이스 색에 fresnel로 밝기 추가
+        vec3 color = baseColor;
+        color += rimColor * fresnel * 0.7;
+        color += vec3(1.0, 1.0, 0.4) * scanline * 0.3;
+        color += vec3(1.0, 1.0, 0.5) * band * 0.4;
+        color = mix(color, attackWhite, uAttack * 0.6);
+        color *= flicker;
+
+        // 알파: 본체는 거의 불투명하게
+        float alpha = (0.75 + fresnel * 0.25 + scanline * 0.1) * uOpacity;
+        alpha = clamp(alpha, 0.0, 1.0);
+
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: true,
+    blending: THREE.NormalBlending,
+  });
+}
+
+// =========================================
+// ⚡ ELECTRIC BOLT (지그재그 번개)
+// =========================================
+function createElectricBolt(start, end, color = 0xffee00) {
+  const points = [];
+  const segments = 12;
+
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const point = new THREE.Vector3().lerpVectors(start, end, t);
+
+    // 끝점이 아니면 랜덤 변위 추가 (지그재그)
+    if (i > 0 && i < segments) {
+      const offset = 0.1 * (1 - Math.abs(t - 0.5) * 2); // 중간에 가장 큼
+      point.x += (Math.random() - 0.5) * offset;
+      point.y += (Math.random() - 0.5) * offset;
+      point.z += (Math.random() - 0.5) * offset;
+    }
+    points.push(point);
+  }
+
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: 1.0,
+    linewidth: 2,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+
+  const bolt = new THREE.Line(geometry, material);
+  bolt.userData.life = 1.0; // 0이 되면 제거
+  bolt.userData.maxLife = 0.3 + Math.random() * 0.15; // 짧게 깜빡
+  return bolt;
+}
+
+// =========================================
+// ⚡ ELECTRIC SPHERE (피카츄 주변 전기장)
+// =========================================
+function createElectricAura(radius = 0.5) {
+  const geometry = new THREE.SphereGeometry(radius, 32, 32);
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uIntensity: { value: 0 },
+    },
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldPos = worldPos.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uIntensity;
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+
+      // Hash function for noise
+      float hash(vec3 p) {
+        p = fract(p * vec3(443.8975, 397.2973, 491.1871));
+        p += dot(p, p.yxz + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+
+      void main() {
+        vec3 viewDir = normalize(cameraPosition - vWorldPos);
+        float fresnel = 1.0 - abs(dot(vNormal, viewDir));
+        fresnel = pow(fresnel, 3.0);
+
+        // 노이즈로 전기 패턴
+        float noise = hash(vWorldPos * 8.0 + uTime * 5.0);
+        float spark = step(0.96 - uIntensity * 0.05, noise);
+
+        vec3 color = vec3(1.0, 0.95, 0.3);
+        float alpha = (fresnel * 0.3 + spark) * uIntensity;
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
+  return new THREE.Mesh(geometry, material);
+}
+
+// =========================================
+// 🌀 SUMMON GATE
+// =========================================
+function createSummonGate() {
+  const group = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.4 + i * 0.06, 0.43 + i * 0.06, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0xffee00,
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    ring.userData.spinSpeed = (i + 1) * 0.025 * (i % 2 === 0 ? 1 : -1);
+    ring.userData.isGateRing = true;
+    group.add(ring);
+  }
+  return group;
+}
+
+// =========================================
+// ✨ PARTICLES
+// =========================================
+function createParticles(count = 150) {
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const r = Math.random() * 0.5;
+    const a = Math.random() * Math.PI * 2;
+    positions[i*3]   = Math.cos(a) * r;
+    positions[i*3+1] = Math.sin(a) * r;
+    positions[i*3+2] = Math.random() * 0.1;
+    velocities[i*3]   = (Math.random() - 0.5) * 0.003;
+    velocities[i*3+1] = (Math.random() - 0.5) * 0.003;
+    velocities[i*3+2] = 0.005 + Math.random() * 0.012;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3));
+
+  const mat = new THREE.PointsMaterial({
+    color: 0xffee00,
+    size: 0.025,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  return new THREE.Points(geo, mat);
+}
+
+// =========================================
+// 🎯 AR START
+// =========================================
+async function startAR() {
+  try {
+    // 진행 상태 표시
+    showStatus(`<div class="spinner"></div><h3>CAMERA INIT</h3><p>AR 엔진 초기화...</p><div class="progress-bar"><div class="progress-fill" style="width:20%"></div></div>`);
+
+    // ⚠️ 카드 인식용 .mind 파일은 데모용을 사용 (실제 배포 시 ./assets/pikachu_card.mind로 교체)
+    // 사용자가 업로드한 Pikachu 카드는 .mind 컴파일이 필요함 (아래 안내 참조)
+    const MIND_FILE = './assets/pikachu_card.mind';
+    const FALLBACK_MIND = 'https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/card.mind';
+
+    // pikachu_card.mind 존재 여부 확인 → 없으면 fallback
+    let mindFile = FALLBACK_MIND;
+    try {
+      const res = await fetch(MIND_FILE, { method: 'HEAD' });
+      if (res.ok) {
+        mindFile = MIND_FILE;
+        console.log('✅ Pikachu 카드 .mind 파일 사용');
+      } else {
+        console.warn('⚠️ pikachu_card.mind 없음 → 데모 카드로 fallback');
+      }
+    } catch (e) {
+      console.warn('⚠️ .mind 파일 체크 실패 → 데모 카드 사용');
+    }
+
+    mindarThree = new MindARThree({
+      container: document.querySelector('#ar-container'),
+      imageTargetSrc: mindFile,
+      uiScanning: 'no',
+      uiLoading: 'no',
+      uiError: 'no',
+    });
+
+    const { renderer, scene, camera } = mindarThree;
+    renderer.setClearColor(0x000000, 0);
+
+    // 조명 (PBR 머티리얼이라 매우 강하게 비춰야 밝게 보임)
+    scene.add(new THREE.AmbientLight(0xffffff, 2.5)); // 환경광 매우 강하게
+
+    // 헤미스피어 라이트 (자연광 효과)
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xfff5d6, 1.5);
+    scene.add(hemiLight);
+
+    // 정면 조명 — 피카츄 얼굴이 잘 보이도록
+    const frontLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    frontLight.position.set(0, 0, 5);
+    scene.add(frontLight);
+
+    // 위에서 따뜻한 키 라이트
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
+    keyLight.position.set(2, 4, 3);
+    scene.add(keyLight);
+
+    // 반대편 보조 조명
+    const fillLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    fillLight.position.set(-2, 2, -2);
+    scene.add(fillLight);
+
+    // 아래에서 비추는 노란 라이트 (피카츄 컬러 강조 + 어두운 배 부분 채움)
+    const bottomLight = new THREE.DirectionalLight(0xffee00, 1.0);
+    bottomLight.position.set(0, -3, 1);
+    scene.add(bottomLight);
+
+    const anchor = mindarThree.addAnchor(0);
+
+    // ===== GLB 모델 로드 =====
+    showStatus(`<div class="spinner"></div><h3>LOADING PIKACHU</h3><p>GLB 모델 로딩...</p><div class="progress-bar"><div class="progress-fill" id="fbx-progress" style="width:40%"></div></div>`);
+
+    const loader = new GLTFLoader();
+    const gltfPromise = new Promise((resolve, reject) => {
+      loader.load(
+        './assets/pikachu.glb',
+        resolve,
+        (progress) => {
+          if (progress.lengthComputable) {
+            const pct = 40 + (progress.loaded / progress.total) * 50;
+            const fill = document.getElementById('fbx-progress');
+            if (fill) fill.style.width = pct + '%';
+          }
+        },
+        reject
+      );
+    });
+
+    const gltf = await gltfPromise;
+    const pikachu = gltf.scene;
+    console.log('✅ GLB loaded:', pikachu);
+    console.log('🎬 GLB 애니메이션:', gltf.animations.length, gltf.animations.map(a => a.name));
+
+    // GLB 원본 색/텍스처 그대로 유지 + 밝기 보정
+    pikachu.traverse((child) => {
+      if (child.isMesh && child.material) {
+        child.material.needsUpdate = true;
+        child.material.side = THREE.DoubleSide;
+
+        // PBR 머티리얼 밝기 보정 (어둡게 나오는 거 방지)
+        if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {
+          // metalness 줄이고 roughness 살짝 올려서 빛 더 잘 받게
+          child.material.metalness = Math.min(child.material.metalness || 0, 0.1);
+          // emissive를 살짝 올려서 자체 발광 (어두운 부분 살림)
+          if (child.material.color) {
+            child.material.emissive = child.material.color.clone().multiplyScalar(0.15);
+            child.material.emissiveIntensity = 1.0;
+          }
+          child.material.envMapIntensity = 1.5;
+        }
+      }
+    });
+
+    // 사이즈 자동 조정 (카드 크기에 맞게)
+    const box = new THREE.Box3().setFromObject(pikachu);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const targetSize = 0.7;
+    const scaleFactor = targetSize / maxDim;
+    pikachu.scale.setScalar(scaleFactor);
+    console.log(`📏 모델 원본 사이즈: ${maxDim.toFixed(2)}, 스케일: ${scaleFactor.toFixed(4)}`);
+
+    // 모델 그룹으로 감싸고 카드 위로 세움
+    const modelGroup = new THREE.Group();
+    modelGroup.add(pikachu);
+
+    // 발이 바닥(z=0)에 오도록 보정 — modelGroup이 90도 회전된 후 z=0이 발이 됨
+    box.setFromObject(pikachu);
+    pikachu.position.y -= box.min.y; // 발을 0,0,0에
+
+    modelGroup.rotation.x = Math.PI / 2; // 카드 위로 세움 (Y-up → Z-up)
+    modelGroup.position.z = 0.0; // 발이 카드 표면에 닿게
+
+    // ===== 애니메이션 설정 (GLB) =====
+    if (gltf.animations && gltf.animations.length > 0) {
+      mixer = new THREE.AnimationMixer(pikachu);
+      // 첫번째 애니메이션을 펀치로 사용 (GLB 안에 펀치 애니가 있으면)
+      punchAction = mixer.clipAction(gltf.animations[0]);
+      punchAction.setLoop(THREE.LoopOnce);
+      punchAction.clampWhenFinished = true;
+      gltf.animations.forEach((clip, i) => {
+        console.log(`  [${i}] "${clip.name}" - ${clip.duration.toFixed(2)}s`);
+      });
+      console.log('✅ 펀치 애니메이션 준비됨:', gltf.animations[0].name);
+    } else {
+      console.warn('⚠️ GLB 안에 애니메이션이 없습니다. THUNDER PUNCH는 시각효과만 작동합니다.');
+    }
+
+    // ===== 이펙트는 그대로 유지 =====
+    // 게이트 (밑에서 회전하는 노란 링)
+    const gate = createSummonGate();
+    gate.position.z = 0.02;
+    anchor.group.add(gate);
+
+    // 빛 입자 (전기 효과용)
+    const particles = createParticles(150);
+    anchor.group.add(particles);
+
+    // 전기 오라 (피카츄 주변)
+    const electricAura = createElectricAura(0.5);
+    electricAura.position.z = 0.4;
+    anchor.group.add(electricAura);
+
+    modelGroup.userData.spawnTime = performance.now();
+    modelGroup.userData.aura = electricAura;
+    anchor.group.add(modelGroup);
+    pikachuModel = modelGroup;
+
+    // ===== 이벤트 =====
+    anchor.onTargetFound = () => {
+      console.log('🎯 카드 인식!');
+      scanHint.classList.remove('active');
+      attackBtn.classList.add('active');
+      hpBar.classList.add('active');
+    };
+    anchor.onTargetLost = () => {
+      console.log('❌ 카드 사라짐');
+      scanHint.classList.add('active');
+      attackBtn.classList.remove('active');
+      hpBar.classList.remove('active');
+    };
+
+    // ===== 공격 버튼 =====
+    attackBtn.addEventListener('click', triggerAttack);
+
+    await mindarThree.start();
+    hideStatus();
+    arUI.classList.add('active');
+    scanHint.classList.add('active');
+
+    // ===== ANIMATION LOOP =====
+    const clock = new THREE.Clock();
+    renderer.setAnimationLoop(() => {
+      const t = clock.getElapsedTime();
+      const dt = clock.getDelta();
+
+      // 애니메이션 믹서
+      if (mixer) mixer.update(dt);
+
+      if (pikachuModel) {
+        // 둥둥 떠있는 효과만 (회전은 제거)
+        if (!isAttacking) {
+          pikachuModel.position.z = 0.0 + Math.sin(t * 1.2) * 0.02;
+        }
+        // ❌ 모델 회전 제거 (사용자 요청)
+
+        // 전기 오라 (피카츄 주변)
+        if (pikachuModel.userData.aura) {
+          pikachuModel.userData.aura.material.uniforms.uTime.value = t;
+          // 평소엔 약한 오라, 공격 시 강한 오라
+          const auraIntensity = isAttacking ? 1.5 : 0.4 + Math.sin(t * 3) * 0.2;
+          pikachuModel.userData.aura.material.uniforms.uIntensity.value = auraIntensity;
+          pikachuModel.userData.aura.position.z = 0.4 + Math.sin(t * 1.2) * 0.03;
+        }
+      }
+
+      // 게이트 회전
+      gate.children.forEach(ring => {
+        if (ring.userData.isGateRing) ring.rotation.z += ring.userData.spinSpeed;
+      });
+
+      // 파티클
+      const positions = particles.geometry.attributes.position;
+      const velocities = particles.geometry.attributes.velocity;
+      for (let i = 0; i < positions.count; i++) {
+        positions.array[i*3]   += velocities.array[i*3];
+        positions.array[i*3+1] += velocities.array[i*3+1];
+        positions.array[i*3+2] += velocities.array[i*3+2];
+        if (positions.array[i*3+2] > 1.0) {
+          const r = Math.random() * 0.5;
+          const a = Math.random() * Math.PI * 2;
+          positions.array[i*3]   = Math.cos(a) * r;
+          positions.array[i*3+1] = Math.sin(a) * r;
+          positions.array[i*3+2] = 0;
+        }
+      }
+      positions.needsUpdate = true;
+
+      // ===== 전기 번개 업데이트 =====
+      for (let i = electricBolts.length - 1; i >= 0; i--) {
+        const bolt = electricBolts[i];
+        bolt.userData.life -= dt / bolt.userData.maxLife;
+        bolt.material.opacity = Math.max(0, bolt.userData.life);
+        if (bolt.userData.life <= 0) {
+          anchor.group.remove(bolt);
+          bolt.geometry.dispose();
+          bolt.material.dispose();
+          electricBolts.splice(i, 1);
+        }
+      }
+
+      renderer.render(scene, camera);
+    });
+
+  } catch (err) {
+    console.error('AR Start Error:', err);
+    let msg = err.message || String(err);
+    if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+      msg = '카메라 권한이 거부되었습니다. 브라우저 설정에서 허용해주세요.';
+    } else if (location.protocol === 'file:') {
+      msg = `<code>file://</code> 로 직접 열면 안됩니다.<br><br><strong>해결:</strong> https/localhost 서버 (Vercel, ngrok 등)로 띄워주세요.`;
+    } else if (msg.includes('Combo_Punch') || msg.includes('Failed to fetch')) {
+      msg = `FBX 파일을 찾을 수 없습니다.<br>같은 폴더에 <code>assets/Combo_Punch.fbx</code> 있는지 확인해주세요.`;
+    }
+    showError('AR INIT FAILED', msg);
+  }
+}
+
+// =========================================
+// 🥊 PUNCH ANIMATION (모델 기울기 + 점프)
+// modelGroup이 rotation.x = 90도 적용된 상태:
+//   - inner의 local +Y = world 위쪽 (카드 위로)
+//   - inner의 local +Z = world 카메라 쪽 (관찰자 방향)
+//   - inner의 local +X = world 오른쪽
+// =========================================
+function animatePunchJS(modelGroup, phase) {
+  const inner = modelGroup.children[0];
+  if (!inner) return;
+
+  const startTime = performance.now();
+  const duration = phase === 'charge' ? 600 : 600;
+  const initialPos = { x: inner.position.x, y: inner.position.y, z: inner.position.z };
+  const initialRot = { x: inner.rotation.x, y: inner.rotation.y, z: inner.rotation.z };
+
+  function step() {
+    const elapsed = performance.now() - startTime;
+    const t = Math.min(1, elapsed / duration);
+
+    if (phase === 'charge') {
+      // CHARGE 단계: 두 손 앞으로 내밀듯 살짝 뒤로 빼고 위로 올라감
+      const eased = 1 - Math.pow(1 - t, 2); // ease-out
+      inner.position.z = initialPos.z + 0.05 * eased; // 살짝 카메라 쪽으로
+      inner.position.y = initialPos.y - 0.08 * eased; // 살짝 위로 (Y가 위)
+      inner.rotation.x = initialRot.x - 0.3 * eased; // 뒤로 살짝 기울이기
+    } else if (phase === 'punch') {
+      // PUNCH 단계: 앞으로 빠르게 펀치 + 진동 + 복귀
+      let punchZ = 0;
+      let tilt = 0;
+      let bob = 0;
+
+      if (t < 0.3) {
+        // 0~30%: 빠르게 앞으로 펀치
+        const p = t / 0.3;
+        const eased = 1 - Math.pow(1 - p, 3);
+        punchZ = 0.3 * eased;
+        tilt = 0.5 * eased;
+      } else if (t < 0.6) {
+        // 30~60%: 임팩트 + 진동
+        const p = (t - 0.3) / 0.3;
+        punchZ = 0.3 + Math.sin(p * Math.PI * 6) * 0.04 * (1 - p);
+        tilt = 0.5;
+        bob = Math.sin(p * Math.PI * 6) * 0.03 * (1 - p);
+      } else {
+        // 60~100%: 원위치 복귀
+        const p = (t - 0.6) / 0.4;
+        const eased = 1 - Math.pow(1 - p, 2);
+        punchZ = 0.3 * (1 - eased);
+        tilt = 0.5 * (1 - eased);
+      }
+
+      inner.position.z = initialPos.z + punchZ;
+      inner.position.y = initialPos.y + bob;
+      inner.rotation.x = initialRot.x + tilt;
+    }
+
+    if (t < 1) {
+      requestAnimationFrame(step);
+    } else if (phase === 'punch') {
+      // 끝나면 완전 원위치
+      inner.position.set(initialPos.x, initialPos.y, initialPos.z);
+      inner.rotation.set(initialRot.x, initialRot.y, initialRot.z);
+    }
+  }
+  step();
+}
+
+// =========================================
+// ⚡ ELECTRIC ORB (전기 구체 - 손 앞에 형성됨)
+// =========================================
+function createElectricOrb() {
+  const group = new THREE.Group();
+
+  // 중심 글로우 (밝은 노란 구체)
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 24, 24),
+    new THREE.MeshBasicMaterial({
+      color: 0xffff88,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  group.add(core);
+
+  // 외부 발광층
+  const outer = new THREE.Mesh(
+    new THREE.SphereGeometry(0.15, 24, 24),
+    new THREE.MeshBasicMaterial({
+      color: 0xffee00,
+      transparent: true,
+      opacity: 0.4,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  group.add(outer);
+
+  // 전기 스파크 (구체 주변 짧은 번개들)
+  group.userData.core = core;
+  group.userData.outer = outer;
+  group.userData.startTime = performance.now();
+
+  return group;
+}
+
+// =========================================
+// ⚡ ELECTRIC BEAM (전기 광선 - 앞으로 발사)
+// =========================================
+function createElectricBeam(length = 1.5) {
+  const group = new THREE.Group();
+
+  // 메인 광선 (실린더)
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.08, length, 16, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xffee00,
+      transparent: true,
+      opacity: 0.7,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+  );
+  beam.position.y = length / 2; // 시작점 기준 앞으로 뻗어나감
+  group.add(beam);
+
+  // 내부 코어 (더 밝은 빛)
+  const core = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.015, 0.03, length, 8, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 1.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  core.position.y = length / 2;
+  group.add(core);
+
+  group.userData.startTime = performance.now();
+  group.userData.life = 1.0;
+  return group;
+}
+
+// =========================================
+// ⚡ THUNDER PUNCH ATTACK (3단계: CHARGE → BEAM → PUNCH)
+// =========================================
+let lastAttackTime = -10;
+function triggerAttack() {
+  if (isAttacking || !pikachuModel) return;
+  isAttacking = true;
+  lastAttackTime = performance.now() / 1000;
+
+  // HP 깜빡 효과
+  const hpFill = document.getElementById('hp-fill');
+  hpFill.style.transition = 'background 0.1s';
+  hpFill.style.background = 'linear-gradient(90deg, #ffee00, #ffaa00)';
+  setTimeout(() => {
+    hpFill.style.background = 'linear-gradient(90deg, #00ff66, #00cc44)';
+  }, 200);
+
+  // 진동
+  if (navigator.vibrate) navigator.vibrate([30, 50, 30, 100, 30, 200]);
+
+  const arGroup = pikachuModel.parent;
+  console.log('⚡⚡⚡ THUNDER PUNCH SEQUENCE START ⚡⚡⚡');
+
+  // ═══════════════════════════════════════════
+  // PHASE 1: CHARGE (0~600ms) - 두 손 앞으로 + 전기구체 생성
+  // ═══════════════════════════════════════════
+  console.log('  Phase 1: CHARGE');
+  animatePunchJS(pikachuModel, 'charge');
+
+  // 피카츄 앞쪽(카메라 방향)에 전기구체 형성
+  const orb = createElectricOrb();
+  // anchor 좌표계: z+가 카메라 방향 (카드 위쪽)
+  orb.position.set(0, 0, 0.5); // 피카츄 가슴 높이쯤
+  orb.scale.set(0.1, 0.1, 0.1); // 작게 시작
+  arGroup.add(orb);
+
+  // 구체 점점 커지기
+  const orbGrowStart = performance.now();
+  function growOrb() {
+    const elapsed = performance.now() - orbGrowStart;
+    const t = Math.min(1, elapsed / 600);
+    const scale = 0.1 + (1 - 0.1) * (1 - Math.pow(1 - t, 2));
+    orb.scale.set(scale, scale, scale);
+
+    // 구체 주변에 짧은 스파크 번개 계속 발생
+    if (Math.random() < 0.4) {
+      const sparkAngle = Math.random() * Math.PI * 2;
+      const sparkR = 0.15 + Math.random() * 0.1;
+      const sparkStart = orb.position.clone();
+      const sparkEnd = sparkStart.clone().add(new THREE.Vector3(
+        Math.cos(sparkAngle) * sparkR,
+        Math.sin(sparkAngle) * sparkR,
+        (Math.random() - 0.5) * 0.1
+      ));
+      const spark = createElectricBolt(sparkStart, sparkEnd, 0xffffaa);
+      spark.userData.maxLife = 0.15;
+      arGroup.add(spark);
+      electricBolts.push(spark);
+    }
+
+    if (t < 1 && isAttacking) {
+      requestAnimationFrame(growOrb);
+    }
+  }
+  growOrb();
+
+  // ═══════════════════════════════════════════
+  // PHASE 2: BEAM (600~1200ms) - 전기 광선 발사
+  // ═══════════════════════════════════════════
+  setTimeout(() => {
+    console.log('  Phase 2: BEAM FIRE!');
+
+    // 구체 폭발(사라지기)
+    arGroup.remove(orb);
+
+    // 전기 광선 생성 (피카츄 앞쪽으로 발사)
+    const beam = createElectricBeam(1.8);
+    beam.position.set(0, 0, 0.5); // 피카츄 가슴에서 시작
+    // anchor 기준 카메라 방향(=z+)으로 광선이 뻗어나가야 함
+    // CylinderGeometry는 기본 Y축 방향이라, +Z 방향으로 회전
+    beam.rotation.x = Math.PI / 2;
+    arGroup.add(beam);
+
+    // 광선 발사 효과: scale.y로 길이가 0 → 1로 자라남
+    beam.children.forEach(c => c.scale.y = 0.01);
+    const beamStart = performance.now();
+    function shootBeam() {
+      const elapsed = performance.now() - beamStart;
+      const t = Math.min(1, elapsed / 200); // 0.2초만에 광선 뻗어나감
+      beam.children.forEach(c => c.scale.y = 0.01 + 0.99 * t);
+
+      if (t < 1) requestAnimationFrame(shootBeam);
+    }
+    shootBeam();
+
+    // 광선 끝나는 지점에서 폭발 효과 (사방으로 번개)
+    setTimeout(() => {
+      // 광선 끝 위치
+      const explodePos = new THREE.Vector3(0, 0, 2.0);
+      for (let i = 0; i < 12; i++) {
+        const angle = (Math.PI * 2 / 12) * i + Math.random() * 0.3;
+        const distance = 0.4 + Math.random() * 0.3;
+        const end = explodePos.clone().add(new THREE.Vector3(
+          Math.cos(angle) * distance,
+          Math.sin(angle) * distance,
+          (Math.random() - 0.5) * 0.3
+        ));
+        const bolt = createElectricBolt(explodePos, end, 0xffff00);
+        arGroup.add(bolt);
+        electricBolts.push(bolt);
+      }
+    }, 200);
+
+    // 광선 페이드아웃
+    setTimeout(() => {
+      const fadeStart = performance.now();
+      function fadeBeam() {
+        const t = Math.min(1, (performance.now() - fadeStart) / 200);
+        beam.children.forEach(c => {
+          c.material.opacity = c.material.opacity * (1 - t * 0.1);
+        });
+        if (t < 1) {
+          requestAnimationFrame(fadeBeam);
+        } else {
+          arGroup.remove(beam);
+          beam.children.forEach(c => {
+            c.geometry.dispose();
+            c.material.dispose();
+          });
+        }
+      }
+      fadeBeam();
+    }, 400);
+
+  }, 600);
+
+  // ═══════════════════════════════════════════
+  // PHASE 3: PUNCH (1200~1800ms) - 펀치 + 사방 번개
+  // ═══════════════════════════════════════════
+  setTimeout(() => {
+    console.log('  Phase 3: PUNCH!');
+
+    // 펀치 모션
+    animatePunchJS(pikachuModel, 'punch');
+
+    // 펀치 시 추가 강한 진동
+    if (navigator.vibrate) navigator.vibrate([100, 50, 150]);
+
+    // 사방으로 번개 발사
+    for (let i = 0; i < 10; i++) {
+      setTimeout(() => {
+        const angle = (Math.PI * 2 / 10) * i + Math.random() * 0.5;
+        const distance = 0.7 + Math.random() * 0.5;
+        const start = new THREE.Vector3(0, 0, 0.4);
+        const end = new THREE.Vector3(
+          Math.cos(angle) * distance,
+          Math.sin(angle) * distance,
+          0.2 + Math.random() * 0.6
+        );
+        const bolt = createElectricBolt(start, end);
+        arGroup.add(bolt);
+        electricBolts.push(bolt);
+      }, i * 25);
+    }
+
+    // 머리 위 흰 번개
+    for (let i = 0; i < 4; i++) {
+      setTimeout(() => {
+        const start = new THREE.Vector3(
+          (Math.random() - 0.5) * 0.3,
+          (Math.random() - 0.5) * 0.3,
+          0.7
+        );
+        const end = new THREE.Vector3(
+          (Math.random() - 0.5) * 0.7,
+          (Math.random() - 0.5) * 0.7,
+          1.4 + Math.random() * 0.4
+        );
+        const bolt = createElectricBolt(start, end, 0xffffff);
+        arGroup.add(bolt);
+        electricBolts.push(bolt);
+      }, 80 + i * 70);
+    }
+  }, 1200);
+
+  // 시퀀스 종료
+  setTimeout(() => {
+    isAttacking = false;
+    console.log('⚡ Sequence complete');
+  }, 2000);
+}
+
+async function stopAR() {
+  if (mindarThree) {
+    try {
+      await mindarThree.stop();
+      mindarThree.renderer.setAnimationLoop(null);
+    } catch (e) { console.warn(e); }
+    mindarThree = null;
+  }
+  arUI.classList.remove('active');
+  scanHint.classList.remove('active');
+  attackBtn.classList.remove('active');
+  hpBar.classList.remove('active');
+  startScreen.classList.remove('hidden');
+}
+
+startBtn.addEventListener('click', () => {
+  if (startBtn.disabled) return;
+  startScreen.classList.add('hidden');
+  setTimeout(startAR, 600);
+});
+stopBtn.addEventListener('click', stopAR);
+</script>
+
+</body>
+</html>
