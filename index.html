@@ -423,7 +423,7 @@
 
 <script type="module">
 import * as THREE from 'three';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MindARThree } from 'mindar-image-three';
 
 const startScreen = document.getElementById('start-screen');
@@ -731,21 +731,24 @@ async function startAR() {
     const { renderer, scene, camera } = mindarThree;
     renderer.setClearColor(0x000000, 0);
 
-    // 조명 (홀로그램이라 약하게)
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    const keyLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    keyLight.position.set(0, 2, 2);
+    // 조명 (GLB 원본 색을 잘 보여주기 위해 균형있게)
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    keyLight.position.set(2, 4, 3);
     scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    fillLight.position.set(-2, 2, -2);
+    scene.add(fillLight);
 
     const anchor = mindarThree.addAnchor(0);
 
-    // ===== FBX 모델 로드 =====
-    showStatus(`<div class="spinner"></div><h3>LOADING PIKACHU</h3><p>FBX 모델 로딩 (600KB)...</p><div class="progress-bar"><div class="progress-fill" id="fbx-progress" style="width:40%"></div></div>`);
+    // ===== GLB 모델 로드 =====
+    showStatus(`<div class="spinner"></div><h3>LOADING PIKACHU</h3><p>GLB 모델 로딩...</p><div class="progress-bar"><div class="progress-fill" id="fbx-progress" style="width:40%"></div></div>`);
 
-    const loader = new FBXLoader();
-    const fbxPromise = new Promise((resolve, reject) => {
+    const loader = new GLTFLoader();
+    const gltfPromise = new Promise((resolve, reject) => {
       loader.load(
-        './assets/Combo_Punch.fbx',
+        './assets/pikachu.glb',
         resolve,
         (progress) => {
           if (progress.lengthComputable) {
@@ -758,89 +761,75 @@ async function startAR() {
       );
     });
 
-    const fbx = await fbxPromise;
-    console.log('✅ FBX loaded:', fbx);
-    console.log('Animations:', fbx.animations.length, fbx.animations.map(a => a.name));
+    const gltf = await gltfPromise;
+    const pikachu = gltf.scene;
+    console.log('✅ GLB loaded:', pikachu);
+    console.log('🎬 GLB 애니메이션:', gltf.animations.length, gltf.animations.map(a => a.name));
 
-    // 모든 메쉬에 홀로그램 셰이더 적용
-    const holoMaterials = [];
-    fbx.traverse((child) => {
+    // GLB 원본 색/텍스처 그대로 유지 (셰이더 교체 안함!)
+    // 모든 메쉬가 라이트에 반응하도록 설정만 확인
+    pikachu.traverse((child) => {
       if (child.isMesh) {
-        const mat = createHologramMaterial();
-        child.material = mat;
-        holoMaterials.push(mat);
+        // 원본 머티리얼 그대로 사용
+        if (child.material) {
+          child.material.needsUpdate = true;
+          // 양면 렌더링으로 안 보이는 면 방지
+          child.material.side = THREE.DoubleSide;
+        }
       }
     });
 
-    // FBX 모델은 보통 cm 단위라 매우 큼 → 스케일링
-    // bounding box 측정 후 카드 크기에 맞춤 (카드는 ~1단위)
-    const box = new THREE.Box3().setFromObject(fbx);
+    // 사이즈 자동 조정 (카드 크기에 맞게)
+    const box = new THREE.Box3().setFromObject(pikachu);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const targetSize = 0.7; // 카드 너비의 70%
+    const targetSize = 0.7;
     const scaleFactor = targetSize / maxDim;
-    fbx.scale.setScalar(scaleFactor);
+    pikachu.scale.setScalar(scaleFactor);
     console.log(`📏 모델 원본 사이즈: ${maxDim.toFixed(2)}, 스케일: ${scaleFactor.toFixed(4)}`);
 
-    // 모델 중심을 0,0,0으로 이동 + 카드 위로 띄움
-    box.setFromObject(fbx);
-    const center = box.getCenter(new THREE.Vector3());
-    fbx.position.sub(center.multiplyScalar(scaleFactor / scaleFactor)); // 중심 보정
-
-    // MindAR 좌표계: 카드는 XY 평면, Z+가 카메라 방향
-    // FBX는 보통 Y-up이라 카드 위에 서게 회전 필요
+    // 모델 그룹으로 감싸고 카드 위로 세움
     const modelGroup = new THREE.Group();
-    modelGroup.add(fbx);
+    modelGroup.add(pikachu);
 
-    // FBX 캐릭터 발이 0,0,0 근처에 오도록 보정
-    box.setFromObject(fbx);
-    fbx.position.y -= box.min.y; // 발을 바닥에
+    // 발이 바닥(z=0)에 오도록 보정
+    box.setFromObject(pikachu);
+    pikachu.position.y -= box.min.y;
 
     modelGroup.rotation.x = Math.PI / 2; // 카드 위로 세움
     modelGroup.position.z = 0.05;
 
-    // 애니메이션 설정 (FBX의 애니메이션은 fbx.animations 또는 자식에 있을 수 있음)
-    let allAnimations = [...(fbx.animations || [])];
-    fbx.traverse((child) => {
-      if (child.animations && child.animations.length > 0) {
-        allAnimations = allAnimations.concat(child.animations);
-      }
-    });
-
-    console.log(`🎬 발견된 애니메이션 클립: ${allAnimations.length}개`);
-    allAnimations.forEach((clip, i) => {
-      console.log(`  [${i}] name: "${clip.name}", duration: ${clip.duration.toFixed(2)}s, tracks: ${clip.tracks.length}`);
-    });
-
-    if (allAnimations.length > 0) {
-      // mixer를 fbx 루트에 연결 (모든 자식 본까지 영향)
-      mixer = new THREE.AnimationMixer(fbx);
-      punchAction = mixer.clipAction(allAnimations[0]);
+    // ===== 애니메이션 설정 (GLB) =====
+    if (gltf.animations && gltf.animations.length > 0) {
+      mixer = new THREE.AnimationMixer(pikachu);
+      // 첫번째 애니메이션을 펀치로 사용 (GLB 안에 펀치 애니가 있으면)
+      punchAction = mixer.clipAction(gltf.animations[0]);
       punchAction.setLoop(THREE.LoopOnce);
       punchAction.clampWhenFinished = true;
-      // 한 번 살짝 재생해서 idle 포즈 확보 (T-pose 방지)
-      punchAction.play();
-      punchAction.paused = true;
-      punchAction.time = 0;
-      console.log('✅ 펀치 애니메이션 준비됨:', allAnimations[0].name);
+      gltf.animations.forEach((clip, i) => {
+        console.log(`  [${i}] "${clip.name}" - ${clip.duration.toFixed(2)}s`);
+      });
+      console.log('✅ 펀치 애니메이션 준비됨:', gltf.animations[0].name);
     } else {
-      console.warn('⚠️ FBX 안에 애니메이션 클립이 없습니다. THUNDER PUNCH는 시각효과만 작동합니다.');
+      console.warn('⚠️ GLB 안에 애니메이션이 없습니다. THUNDER PUNCH는 시각효과만 작동합니다.');
     }
 
-    // 게이트 + 파티클 + 전기 오라
+    // ===== 이펙트는 그대로 유지 =====
+    // 게이트 (밑에서 회전하는 노란 링)
     const gate = createSummonGate();
     gate.position.z = 0.02;
     anchor.group.add(gate);
 
+    // 빛 입자 (전기 효과용)
     const particles = createParticles(150);
     anchor.group.add(particles);
 
+    // 전기 오라 (피카츄 주변)
     const electricAura = createElectricAura(0.5);
     electricAura.position.z = 0.4;
     anchor.group.add(electricAura);
 
     modelGroup.userData.spawnTime = performance.now();
-    modelGroup.userData.holoMaterials = holoMaterials;
     modelGroup.userData.aura = electricAura;
     anchor.group.add(modelGroup);
     pikachuModel = modelGroup;
@@ -877,30 +866,13 @@ async function startAR() {
       if (mixer) mixer.update(dt);
 
       if (pikachuModel) {
-        const elapsed = (performance.now() - pikachuModel.userData.spawnTime) / 1000;
-
-        // 등장 페이드인
-        const holoOpacity = Math.min(1, elapsed * 0.8);
-
-        // 둥둥 효과 (공격 중이 아닐 때만)
+        // 둥둥 떠있는 효과만 (회전은 제거)
         if (!isAttacking) {
           pikachuModel.position.z = 0.05 + Math.sin(t * 1.2) * 0.03;
         }
+        // ❌ 모델 회전 제거 (사용자 요청)
 
-        // 천천히 회전 (공격 중이 아닐 때만)
-        if (!isAttacking) {
-          pikachuModel.rotation.y = t * 0.3;
-        }
-
-        // 셰이더 업데이트
-        const attackPulse = isAttacking ? 1.0 : Math.max(0, 1 - (t - lastAttackTime) * 2);
-        pikachuModel.userData.holoMaterials.forEach(m => {
-          m.uniforms.uTime.value = t;
-          m.uniforms.uOpacity.value = holoOpacity;
-          m.uniforms.uAttack.value = attackPulse;
-        });
-
-        // 전기 오라
+        // 전기 오라 (피카츄 주변)
         if (pikachuModel.userData.aura) {
           pikachuModel.userData.aura.material.uniforms.uTime.value = t;
           // 평소엔 약한 오라, 공격 시 강한 오라
