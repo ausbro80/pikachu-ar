@@ -505,36 +505,42 @@ function createHologramMaterial() {
       void main() {
         // Fresnel rim
         float fresnel = 1.0 - max(dot(vNormal, vViewDir), 0.0);
-        fresnel = pow(fresnel, 2.0);
+        fresnel = pow(fresnel, 1.5);
 
         // 가로 스캔라인
         float scanline = sin(vWorldPos.y * 60.0 - uTime * 4.0) * 0.5 + 0.5;
-        scanline = pow(scanline, 6.0);
+        scanline = pow(scanline, 4.0);
 
         // 흐르는 띠
         float band = smoothstep(0.93, 1.0, sin(vWorldPos.y * 3.0 - uTime * 1.2) * 0.5 + 0.5);
 
-        // 깜빡임 (공격 시 격렬해짐)
-        float flicker = 0.85 + 0.15 * sin(uTime * (20.0 + uAttack * 50.0));
+        // 깜빡임
+        float flicker = 0.92 + 0.08 * sin(uTime * (20.0 + uAttack * 50.0));
 
-        // 피카츄 노란색 베이스
-        vec3 baseColor = vec3(1.0, 0.85, 0.05); // pikachu yellow
-        vec3 rimColor = vec3(1.0, 1.0, 0.4);    // 가장자리 밝은 노랑
-        vec3 attackColor = vec3(1.0, 1.0, 1.0); // 공격 시 흰색 폭발
+        // 피카츄 노란색 (더 진하게)
+        vec3 baseColor = vec3(1.0, 0.78, 0.0);   // 진한 피카츄 노랑
+        vec3 rimColor = vec3(1.0, 1.0, 0.6);     // 가장자리 밝은 노랑
+        vec3 attackWhite = vec3(1.0, 1.0, 0.9);
 
-        vec3 color = mix(baseColor, rimColor, fresnel * 0.6);
-        color = mix(color, attackColor, uAttack * fresnel * 0.8);
+        // 베이스 색에 fresnel로 밝기 추가
+        vec3 color = baseColor;
+        color += rimColor * fresnel * 0.7;
+        color += vec3(1.0, 1.0, 0.4) * scanline * 0.3;
+        color += vec3(1.0, 1.0, 0.5) * band * 0.4;
+        color = mix(color, attackWhite, uAttack * 0.6);
+        color *= flicker;
 
-        float alpha = (fresnel * 0.85 + scanline * 0.35 + band * 0.5 + uAttack * 0.4) * flicker;
-        alpha = clamp(alpha, 0.2, 1.0) * uOpacity;
+        // 알파: 본체는 거의 불투명하게
+        float alpha = (0.75 + fresnel * 0.25 + scanline * 0.1) * uOpacity;
+        alpha = clamp(alpha, 0.0, 1.0);
 
         gl_FragColor = vec4(color, alpha);
       }
     `,
     transparent: true,
     side: THREE.DoubleSide,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    depthWrite: true,
+    blending: THREE.NormalBlending,
   });
 }
 
@@ -793,13 +799,32 @@ async function startAR() {
     modelGroup.rotation.x = Math.PI / 2; // 카드 위로 세움
     modelGroup.position.z = 0.05;
 
-    // 애니메이션 설정
-    if (fbx.animations.length > 0) {
+    // 애니메이션 설정 (FBX의 애니메이션은 fbx.animations 또는 자식에 있을 수 있음)
+    let allAnimations = [...(fbx.animations || [])];
+    fbx.traverse((child) => {
+      if (child.animations && child.animations.length > 0) {
+        allAnimations = allAnimations.concat(child.animations);
+      }
+    });
+
+    console.log(`🎬 발견된 애니메이션 클립: ${allAnimations.length}개`);
+    allAnimations.forEach((clip, i) => {
+      console.log(`  [${i}] name: "${clip.name}", duration: ${clip.duration.toFixed(2)}s, tracks: ${clip.tracks.length}`);
+    });
+
+    if (allAnimations.length > 0) {
+      // mixer를 fbx 루트에 연결 (모든 자식 본까지 영향)
       mixer = new THREE.AnimationMixer(fbx);
-      punchAction = mixer.clipAction(fbx.animations[0]);
+      punchAction = mixer.clipAction(allAnimations[0]);
       punchAction.setLoop(THREE.LoopOnce);
       punchAction.clampWhenFinished = true;
-      console.log('✅ 펀치 애니메이션 준비됨:', fbx.animations[0].name);
+      // 한 번 살짝 재생해서 idle 포즈 확보 (T-pose 방지)
+      punchAction.play();
+      punchAction.paused = true;
+      punchAction.time = 0;
+      console.log('✅ 펀치 애니메이션 준비됨:', allAnimations[0].name);
+    } else {
+      console.warn('⚠️ FBX 안에 애니메이션 클립이 없습니다. THUNDER PUNCH는 시각효과만 작동합니다.');
     }
 
     // 게이트 + 파티클 + 전기 오라
@@ -959,10 +984,17 @@ function triggerAttack() {
   // 진동 (모바일)
   if (navigator.vibrate) navigator.vibrate([50, 30, 100]);
 
-  // 애니메이션 재생
+  // 애니메이션 재생 (paused 상태 풀고 처음부터)
   if (punchAction) {
     punchAction.reset();
+    punchAction.paused = false;
+    punchAction.timeScale = 1.0;
+    punchAction.setLoop(THREE.LoopOnce);
+    punchAction.clampWhenFinished = true;
     punchAction.play();
+    console.log('🥊 PUNCH! duration:', punchAction.getClip().duration.toFixed(2), 's');
+  } else {
+    console.warn('⚠️ punchAction이 없어서 시각효과만 재생됩니다.');
   }
 
   // 전기 번개 다발 생성
