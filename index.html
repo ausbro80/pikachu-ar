@@ -731,32 +731,27 @@ async function startAR() {
     const { renderer, scene, camera } = mindarThree;
     renderer.setClearColor(0x000000, 0);
 
-    // 조명 (PBR 머티리얼이라 매우 강하게 비춰야 밝게 보임)
-    scene.add(new THREE.AmbientLight(0xffffff, 2.5)); // 환경광 매우 강하게
+    // 조명 (디테일 살리는 적정 수준)
+    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-    // 헤미스피어 라이트 (자연광 효과)
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xfff5d6, 1.5);
+    // 헤미스피어 라이트 (자연광)
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xfff5d6, 0.8);
     scene.add(hemiLight);
 
-    // 정면 조명 — 피카츄 얼굴이 잘 보이도록
-    const frontLight = new THREE.DirectionalLight(0xffffff, 2.5);
+    // 정면 키 라이트
+    const frontLight = new THREE.DirectionalLight(0xffffff, 1.5);
     frontLight.position.set(0, 0, 5);
     scene.add(frontLight);
 
     // 위에서 따뜻한 키 라이트
-    const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
     keyLight.position.set(2, 4, 3);
     scene.add(keyLight);
 
-    // 반대편 보조 조명
-    const fillLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    // 반대편 보조
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
     fillLight.position.set(-2, 2, -2);
     scene.add(fillLight);
-
-    // 아래에서 비추는 노란 라이트 (피카츄 컬러 강조 + 어두운 배 부분 채움)
-    const bottomLight = new THREE.DirectionalLight(0xffee00, 1.0);
-    bottomLight.position.set(0, -3, 1);
-    scene.add(bottomLight);
 
     const anchor = mindarThree.addAnchor(0);
 
@@ -784,22 +779,19 @@ async function startAR() {
     console.log('✅ GLB loaded:', pikachu);
     console.log('🎬 GLB 애니메이션:', gltf.animations.length, gltf.animations.map(a => a.name));
 
-    // GLB 원본 색/텍스처 그대로 유지 + 밝기 보정
+    // GLB 원본 색/텍스처 그대로 유지 + 약간의 밝기 보정
     pikachu.traverse((child) => {
       if (child.isMesh && child.material) {
         child.material.needsUpdate = true;
         child.material.side = THREE.DoubleSide;
 
-        // PBR 머티리얼 밝기 보정 (어둡게 나오는 거 방지)
+        // PBR 머티리얼 보정 (디테일 보존, 화이트워시 방지)
         if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {
-          // metalness 줄이고 roughness 살짝 올려서 빛 더 잘 받게
           child.material.metalness = Math.min(child.material.metalness || 0, 0.1);
-          // emissive를 살짝 올려서 자체 발광 (어두운 부분 살림)
-          if (child.material.color) {
-            child.material.emissive = child.material.color.clone().multiplyScalar(0.15);
-            child.material.emissiveIntensity = 1.0;
-          }
-          child.material.envMapIntensity = 1.5;
+          // ❌ emissive 제거 — 디테일 다 날아가는 원인
+          child.material.emissive = new THREE.Color(0x000000);
+          child.material.emissiveIntensity = 0;
+          child.material.envMapIntensity = 1.0;
         }
       }
     });
@@ -825,18 +817,54 @@ async function startAR() {
     modelGroup.position.z = 0.0; // 발이 카드 표면에 닿게
 
     // ===== 애니메이션 설정 (GLB) =====
+    // GLTFLoader는 보통 gltf.animations에 저장하지만, 일부 GLB는 scene 내부에 있음
+    let allAnimations = [];
+
+    // 1. 표준 위치 체크
     if (gltf.animations && gltf.animations.length > 0) {
+      allAnimations = [...gltf.animations];
+    }
+
+    // 2. scene 내부의 모든 자식에서 찾기
+    pikachu.traverse((child) => {
+      if (child.animations && child.animations.length > 0) {
+        child.animations.forEach(anim => {
+          if (!allAnimations.find(a => a.uuid === anim.uuid)) {
+            allAnimations.push(anim);
+          }
+        });
+      }
+    });
+
+    console.log(`🎬 발견된 애니메이션 클립: ${allAnimations.length}개`);
+    allAnimations.forEach((clip, i) => {
+      console.log(`  [${i}] "${clip.name}" - duration: ${clip.duration.toFixed(2)}s, tracks: ${clip.tracks.length}`);
+    });
+
+    if (allAnimations.length > 0) {
+      // ✅ AnimationMixer는 GLB 루트(pikachu)에 연결
       mixer = new THREE.AnimationMixer(pikachu);
-      // 첫번째 애니메이션을 펀치로 사용 (GLB 안에 펀치 애니가 있으면)
-      punchAction = mixer.clipAction(gltf.animations[0]);
+      const clip = allAnimations[0];
+
+      punchAction = mixer.clipAction(clip);
       punchAction.setLoop(THREE.LoopOnce);
       punchAction.clampWhenFinished = true;
-      gltf.animations.forEach((clip, i) => {
-        console.log(`  [${i}] "${clip.name}" - ${clip.duration.toFixed(2)}s`);
+      punchAction.enabled = true;
+      punchAction.weight = 1.0;
+
+      console.log('✅ 펀치 애니메이션 준비 완료:', clip.name, `(${clip.duration.toFixed(2)}s, ${clip.tracks.length}tracks)`);
+      console.log('   mixer:', mixer);
+      console.log('   action:', punchAction);
+
+      // 트랙 검증 — 어떤 본이 움직이는지 확인
+      const boneNames = new Set();
+      clip.tracks.slice(0, 5).forEach(track => {
+        const boneName = track.name.split('.')[0];
+        boneNames.add(boneName);
       });
-      console.log('✅ 펀치 애니메이션 준비됨:', gltf.animations[0].name);
+      console.log('   움직이는 본 (샘플):', [...boneNames].slice(0, 5));
     } else {
-      console.warn('⚠️ GLB 안에 애니메이션이 없습니다. THUNDER PUNCH는 시각효과만 작동합니다.');
+      console.warn('⚠️ GLB 안에 애니메이션이 없습니다. JS 펀치로 대체.');
     }
 
     // ===== 이펙트는 그대로 유지 =====
@@ -966,65 +994,80 @@ async function startAR() {
 //   - inner의 local +Z = world 카메라 쪽 (관찰자 방향)
 //   - inner의 local +X = world 오른쪽
 // =========================================
+// =========================================
+// 🥊 PUNCH ANIMATION (안전 버전 — 항상 원위치로 복귀)
+// =========================================
 function animatePunchJS(modelGroup, phase) {
   const inner = modelGroup.children[0];
   if (!inner) return;
 
+  // 🔑 중요: 베이스 포즈를 한 번만 저장하고 매번 거기서 시작
+  if (!inner.userData.basePose) {
+    inner.userData.basePose = {
+      px: inner.position.x, py: inner.position.y, pz: inner.position.z,
+      rx: inner.rotation.x, ry: inner.rotation.y, rz: inner.rotation.z,
+    };
+  }
+  const base = inner.userData.basePose;
+
+  // 매번 베이스 포즈로 강제 리셋 (누적 방지)
+  inner.position.set(base.px, base.py, base.pz);
+  inner.rotation.set(base.rx, base.ry, base.rz);
+
   const startTime = performance.now();
   const duration = phase === 'charge' ? 600 : 600;
-  const initialPos = { x: inner.position.x, y: inner.position.y, z: inner.position.z };
-  const initialRot = { x: inner.rotation.x, y: inner.rotation.y, z: inner.rotation.z };
+
+  // 이전 애니메이션 취소 (중첩 방지)
+  if (inner.userData.animFrame) {
+    cancelAnimationFrame(inner.userData.animFrame);
+  }
 
   function step() {
     const elapsed = performance.now() - startTime;
     const t = Math.min(1, elapsed / duration);
 
     if (phase === 'charge') {
-      // CHARGE 단계: 두 손 앞으로 내밀듯 살짝 뒤로 빼고 위로 올라감
-      const eased = 1 - Math.pow(1 - t, 2); // ease-out
-      inner.position.z = initialPos.z + 0.05 * eased; // 살짝 카메라 쪽으로
-      inner.position.y = initialPos.y - 0.08 * eased; // 살짝 위로 (Y가 위)
-      inner.rotation.x = initialRot.x - 0.3 * eased; // 뒤로 살짝 기울이기
+      // CHARGE: 살짝만 뒤로 기울이기 (베이스에서 +값 추가)
+      const eased = 1 - Math.pow(1 - t, 2);
+      const tilt = -0.2 * eased * (1 - t * 0.5); // 끝에 갈수록 줄어듦
+      inner.rotation.x = base.rx + tilt;
+      inner.position.set(base.px, base.py, base.pz);
     } else if (phase === 'punch') {
-      // PUNCH 단계: 앞으로 빠르게 펀치 + 진동 + 복귀
       let punchZ = 0;
       let tilt = 0;
       let bob = 0;
 
       if (t < 0.3) {
-        // 0~30%: 빠르게 앞으로 펀치
         const p = t / 0.3;
         const eased = 1 - Math.pow(1 - p, 3);
         punchZ = 0.3 * eased;
-        tilt = 0.5 * eased;
+        tilt = 0.4 * eased;
       } else if (t < 0.6) {
-        // 30~60%: 임팩트 + 진동
         const p = (t - 0.3) / 0.3;
         punchZ = 0.3 + Math.sin(p * Math.PI * 6) * 0.04 * (1 - p);
-        tilt = 0.5;
+        tilt = 0.4;
         bob = Math.sin(p * Math.PI * 6) * 0.03 * (1 - p);
       } else {
-        // 60~100%: 원위치 복귀
         const p = (t - 0.6) / 0.4;
         const eased = 1 - Math.pow(1 - p, 2);
         punchZ = 0.3 * (1 - eased);
-        tilt = 0.5 * (1 - eased);
+        tilt = 0.4 * (1 - eased);
       }
 
-      inner.position.z = initialPos.z + punchZ;
-      inner.position.y = initialPos.y + bob;
-      inner.rotation.x = initialRot.x + tilt;
+      inner.position.set(base.px, base.py + bob, base.pz + punchZ);
+      inner.rotation.set(base.rx + tilt, base.ry, base.rz);
     }
 
     if (t < 1) {
-      requestAnimationFrame(step);
-    } else if (phase === 'punch') {
-      // 끝나면 완전 원위치
-      inner.position.set(initialPos.x, initialPos.y, initialPos.z);
-      inner.rotation.set(initialRot.x, initialRot.y, initialRot.z);
+      inner.userData.animFrame = requestAnimationFrame(step);
+    } else {
+      // ✅ 끝나면 무조건 베이스 포즈로 복귀
+      inner.position.set(base.px, base.py, base.pz);
+      inner.rotation.set(base.rx, base.ry, base.rz);
+      inner.userData.animFrame = null;
     }
   }
-  step();
+  inner.userData.animFrame = requestAnimationFrame(step);
 }
 
 // =========================================
@@ -1134,13 +1177,15 @@ function triggerAttack() {
   // PHASE 1: CHARGE (0~600ms) - 두 손 앞으로 + 전기구체 생성
   // ═══════════════════════════════════════════
   console.log('  Phase 1: CHARGE');
-  animatePunchJS(pikachuModel, 'charge');
+  // GLB 애니가 있으면 JS 모션 건드리지 않음 (충돌 방지 + 누적 회전 방지)
+  if (!punchAction) {
+    animatePunchJS(pikachuModel, 'charge');
+  }
 
-  // 피카츄 앞쪽(카메라 방향)에 전기구체 형성
+  // 피카츄 가슴 앞에 전기구체 형성 (작게, 잘 보이게)
   const orb = createElectricOrb();
-  // anchor 좌표계: z+가 카메라 방향 (카드 위쪽)
-  orb.position.set(0, 0, 0.5); // 피카츄 가슴 높이쯤
-  orb.scale.set(0.1, 0.1, 0.1); // 작게 시작
+  orb.position.set(0, 0, 0.55); // 카드 위 0.55 = 피카츄 가슴 앞
+  orb.scale.set(0.1, 0.1, 0.1);
   arGroup.add(orb);
 
   // 구체 점점 커지기
@@ -1249,8 +1294,24 @@ function triggerAttack() {
   setTimeout(() => {
     console.log('  Phase 3: PUNCH!');
 
-    // 펀치 모션
-    animatePunchJS(pikachuModel, 'punch');
+    // GLB 애니가 있으면 우선 사용 (JS는 충돌 방지로 호출 안함)
+    if (punchAction && mixer) {
+      // 안전하게 reset 후 play
+      punchAction.stop();
+      punchAction.reset();
+      punchAction.enabled = true;
+      punchAction.paused = false;
+      punchAction.timeScale = 1.5;
+      punchAction.weight = 1.0;
+      punchAction.setLoop(THREE.LoopOnce);
+      punchAction.clampWhenFinished = true;
+      punchAction.fadeIn(0.1);
+      punchAction.play();
+      console.log('  🥊 GLB punchAction.play() 호출 — time:', punchAction.time, 'isRunning:', punchAction.isRunning());
+    } else {
+      animatePunchJS(pikachuModel, 'punch');
+      console.log('  🥊 JS 펀치 모션 재생 (GLB 애니 없음)');
+    }
 
     // 펀치 시 추가 강한 진동
     if (navigator.vibrate) navigator.vibrate([100, 50, 150]);
