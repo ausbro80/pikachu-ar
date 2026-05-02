@@ -184,18 +184,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MindARThree } from 'mindar-image-three';
 
-// ===== 디버그 로그 (화면에 표시) =====
+// ===== 디버그 로그 (콘솔에만 출력, 화면에는 안 보임) =====
 const debugLog = document.getElementById('debug-log');
-const logs = [];
 function log(msg, type = 'info') {
   console.log(msg);
-  logs.push({ msg, type, time: new Date().toLocaleTimeString() });
-  if (logs.length > 15) logs.shift();
-  debugLog.classList.add('active');
-  debugLog.innerHTML = logs.map(l =>
-    `<div class="${l.type === 'err' ? 'err' : l.type === 'warn' ? 'warn' : ''}">${l.time.split(' ')[0]} ${l.msg}</div>`
-  ).join('');
-  debugLog.scrollTop = debugLog.scrollHeight;
+  // 화면 표시 비활성화
 }
 
 const startScreen = document.getElementById('start-screen');
