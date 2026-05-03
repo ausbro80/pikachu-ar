@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>⚡ Pokemon AR</title>
 
 <script type="importmap">
@@ -346,7 +349,7 @@ async function startAR() {
 
     mindarThree = new MindARThree({
       container: document.querySelector('#ar-container'),
-      imageTargetSrc: './assets/pikachu_card.mind',
+      imageTargetSrc: './assets/pikachu_card.mind?v=' + Date.now(),
       maxTrack: 2,
       uiScanning: 'no',
       uiLoading: 'no',
@@ -385,7 +388,7 @@ async function startAR() {
 
       const loader = new GLTFLoader();
       const gltf = await new Promise((resolve, reject) => {
-        loader.load(config.glbPath, resolve, undefined, reject);
+        loader.load(config.glbPath + '?v=' + Date.now(), resolve, undefined, reject);
       });
       log(`${config.name} 로드 완료, anims=${gltf.animations.length}`);
 
@@ -403,39 +406,41 @@ async function startAR() {
         }
       });
 
-      // 사이즈 조정 - 메시만 측정 (본/skeleton 제외)
-      // 중요: matrix update 강제 호출해야 정확한 박스 얻음
+      // 사이즈 조정 - 모델별 고정 scale 사용 (bounding box 계산이 SkinnedMesh에서 부정확함)
       model.updateMatrixWorld(true);
-
-      const box = new THREE.Box3();
-      let meshCount = 0;
-      model.traverse((child) => {
-        if (child.isMesh && !child.isSkinnedMesh) {
-          // 일반 메시: bounding box 직접 측정
-          const meshBox = new THREE.Box3().setFromObject(child);
-          if (!meshBox.isEmpty()) {
-            box.union(meshBox);
-            meshCount++;
+      let scaleFactor;
+      if (config.fixedScale) {
+        // 고정 scale 사용
+        scaleFactor = config.fixedScale;
+      } else {
+        // bbox 계산 (fallback)
+        const box = new THREE.Box3();
+        let meshCount = 0;
+        model.traverse((child) => {
+          if (child.isMesh && !child.isSkinnedMesh) {
+            const meshBox = new THREE.Box3().setFromObject(child);
+            if (!meshBox.isEmpty()) {
+              box.union(meshBox);
+              meshCount++;
+            }
+          } else if (child.isSkinnedMesh) {
+            if (!child.geometry.boundingBox) {
+              child.geometry.computeBoundingBox();
+            }
+            const localBox = child.geometry.boundingBox.clone();
+            localBox.applyMatrix4(child.matrixWorld);
+            if (!localBox.isEmpty()) {
+              box.union(localBox);
+              meshCount++;
+            }
           }
-        } else if (child.isSkinnedMesh) {
-          // SkinnedMesh: geometry의 bounding box 사용 (deform 결과)
-          if (!child.geometry.boundingBox) {
-            child.geometry.computeBoundingBox();
-          }
-          const localBox = child.geometry.boundingBox.clone();
-          // world 좌표로 변환
-          localBox.applyMatrix4(child.matrixWorld);
-          if (!localBox.isEmpty()) {
-            box.union(localBox);
-            meshCount++;
-          }
-        }
-      });
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-      const scaleFactor = (config.targetSize || 0.7) / maxDim;
+        });
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        scaleFactor = (config.targetSize || 0.7) / maxDim;
+      }
       model.scale.setScalar(scaleFactor);
-      log(`${config.name} meshes=${meshCount} maxDim=${maxDim.toFixed(0)} scale=${scaleFactor.toFixed(4)}`);
+      log(`${config.name} scale=${scaleFactor.toFixed(4)}`);
 
       // 발 보정 + 중심 정렬 (메시만 측정, scaling 적용 후)
       model.updateMatrixWorld(true);
@@ -580,15 +585,15 @@ async function startAR() {
         name: 'Pikachu',
         glbPath: './assets/pikachu.glb',
         anchor: anchorPikachu,
-        holoColor: new THREE.Color(0.4, 0.9, 1.0), // 청록
-        targetSize: 0.25, // 피카츄 작게
+        holoColor: new THREE.Color(0.4, 0.9, 1.0),
+        fixedScale: 0.5, // 피카츄 GLB 원본 사이즈가 작음 → 0.5 정도면 적당
       }),
       loadPokemon({
         name: 'Charizard',
         glbPath: './assets/charizard.glb',
         anchor: anchorCharizard,
-        holoColor: new THREE.Color(1.0, 0.6, 0.2), // 주황 (화염)
-        targetSize: 1.4, // 리자몽 위풍당당하게 (그대로 유지)
+        holoColor: new THREE.Color(1.0, 0.6, 0.2),
+        fixedScale: 0.005, // 리자몽 GLB 원본 사이즈 큼 (~270 단위) → 0.005가 적정
       })
     ]);
 
