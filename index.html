@@ -578,10 +578,17 @@ async function startAR() {
 
       // 리자몽 본 찾기 (새 모델: skeleton 기반, 'Wing'/'Tail'/'FireCore' 본)
       if (config.name === 'Charizard') {
-        config.parts = { wingBones: [], tailBones: [], fireBones: [] };
+        config.parts = { wingBones: [], tailBones: [], fireBones: [], headBone: null, jawBone: null };
         model.traverse((child) => {
           if (child.isBone || child.type === 'Bone') {
             const n = child.name;
+            // 머리/턱 본 (입 위치용)
+            if (n.match(/^Head_/i) || n.match(/^EndHead/i)) {
+              if (!config.parts.headBone) config.parts.headBone = child;
+            }
+            if (n.match(/Jaw/i)) {
+              if (!config.parts.jawBone) config.parts.jawBone = child;
+            }
             // 날개 본 (LWing*, RWing*, Wing*)
             if (n.match(/Wing/i)) {
               config.parts.wingBones.push(child);
@@ -589,7 +596,6 @@ async function startAR() {
             // 꼬리 본 (Tail1~7만, TailA는 제외 — 충돌 방지)
             if (n.match(/^Tail[1-9]/i)) {
               config.parts.tailBones.push(child);
-              // 초기 회전 저장 (베이스 포즈)
               child.userData.baseRotY = child.rotation.y;
             }
             // 화염 본 (FireCore, FireA)
@@ -599,7 +605,7 @@ async function startAR() {
             }
           }
         });
-        log(`Charizard bones: wings=${config.parts.wingBones.length} tail=${config.parts.tailBones.length} fire=${config.parts.fireBones.length}`);
+        log(`Charizard bones: wings=${config.parts.wingBones.length} tail=${config.parts.tailBones.length} fire=${config.parts.fireBones.length} head=${!!config.parts.headBone}`);
       }
 
       config.anchor.group.add(modelGroup);
@@ -658,7 +664,7 @@ async function startAR() {
         glbPath: './assets/charizard.glb',
         anchor: anchorCharizard,
         holoColor: new THREE.Color(1.0, 0.6, 0.2),
-        fixedScale: 0.09, // 살짝 키움
+        fixedScale: 0.135, // 0.09 → 0.135 (1.5배)
       })
     ]);
 
@@ -865,41 +871,52 @@ function triggerPunch() {
         p.isAttacking = false;
       }, 1500);
     } else if (p.name === 'Charizard') {
-      // 🔥 리자몽: 입에서 화염 분사
-      // modelGroup은 rotation.x = π/2 회전됨
-      // 모델 사이즈 0.09 적용된 후, 카드 평면 기준 좌표로 입 위치 찾음
-      // 카드 평면 기준: x=0(중앙), y=앞쪽(-), z=위쪽(+)
-      // 리자몽 입은 모델의 전방 + 위쪽 → 카드 기준 (0, -0.2, 0.5) 정도
+      // 🔥 리자몽: 머리 본 위치에서 화염 분사 (정확한 입 위치)
+      const headBone = p.parts && p.parts.headBone;
+      const arGroupLocal = p.anchor.group;
 
       const flameInterval = setInterval(() => {
+        // 매 프레임마다 머리 본의 현재 world position 가져옴
+        let mouthPos = new THREE.Vector3(0, -0.15, 0.5); // fallback
+        if (headBone) {
+          // 머리 본의 world 좌표
+          const worldPos = new THREE.Vector3();
+          headBone.getWorldPosition(worldPos);
+          // anchor.group 기준 local 좌표로 변환
+          arGroupLocal.worldToLocal(worldPos);
+          // 입은 머리 본 약간 앞쪽
+          mouthPos.copy(worldPos);
+          mouthPos.y -= 0.1; // 살짝 앞으로 (카드 평면 기준)
+        }
+
         for (let i = 0; i < 10; i++) {
-          const geom = new THREE.SphereGeometry(0.04 + Math.random() * 0.03, 8, 8);
+          const geom = new THREE.SphereGeometry(0.04 + Math.random() * 0.04, 8, 8);
+          // 진짜 불색깔 (빨강~주황~노랑) - 더 빨강 쪽으로
+          const hue = 0.0 + Math.random() * 0.08; // 0=빨강, 0.08=주황
+          const sat = 1.0;
+          const lit = 0.5 + Math.random() * 0.15;
           const mat = new THREE.MeshBasicMaterial({
-            color: new THREE.Color().setHSL(0.05 + Math.random() * 0.07, 1.0, 0.6),
+            color: new THREE.Color().setHSL(hue, sat, lit),
             transparent: true,
             opacity: 1.0,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
           });
           const flame = new THREE.Mesh(geom, mat);
-
-          // 리자몽 입 위치 (카드 평면 좌표계, 모델 회전 후)
-          // 원점: 카드 중심, +Z = 카드 위로 솟은 방향
-          flame.position.set(
-            (Math.random() - 0.5) * 0.1,   // X: 좌우 약간
-            -0.15 + (Math.random() - 0.5) * 0.05, // Y: 카드 앞쪽 (음수)
-            0.5 + (Math.random() - 0.5) * 0.05    // Z: 머리 높이
-          );
-          // 입 앞쪽으로 분사 (-Y 방향 = 카드 평면에서 앞쪽)
+          flame.position.copy(mouthPos);
+          flame.position.x += (Math.random() - 0.5) * 0.1;
+          flame.position.y += (Math.random() - 0.5) * 0.05;
+          flame.position.z += (Math.random() - 0.5) * 0.05;
+          // 입 앞쪽으로 분사 (-Y = 카드 앞쪽)
           flame.userData.velocity = new THREE.Vector3(
             (Math.random() - 0.5) * 0.6,
-            -1.5 - Math.random() * 1.0,  // -Y로 빠르게 (앞으로 발사)
+            -1.5 - Math.random() * 1.0,
             (Math.random() - 0.5) * 0.4
           );
           flame.userData.life = 1.0;
           flame.userData.maxLife = 0.5 + Math.random() * 0.3;
 
-          arGroup.add(flame); // anchor.group에 추가 (카드 따라감)
+          arGroup.add(flame);
           p.flames.push(flame);
         }
       }, 50);
