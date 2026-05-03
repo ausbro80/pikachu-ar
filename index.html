@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>⚡ Pikachu AR</title>
+<title>⚡ Pokemon AR</title>
 
 <script type="importmap">
 {
@@ -153,15 +153,15 @@
 
 <div id="start-screen">
   <div class="pokeball"></div>
-  <h1>PIKACHU AR</h1>
-  <div class="subtitle">⚡ Mixamo Punch ⚡</div>
+  <h1>POKEMON AR</h1>
+  <div class="subtitle">⚡ Pikachu vs 🔥 Charizard ⚡</div>
   <button class="start-btn" id="start-btn" disabled>LOADING...</button>
 </div>
 
 <div id="ar-container"></div>
 
 <div id="ar-ui">
-  <div class="badge">PIKACHU LIVE</div>
+  <div class="badge">POKEMON LIVE</div>
   <button class="stop-btn" id="stop-btn">EXIT</button>
 </div>
 
@@ -169,7 +169,7 @@
 
 <div id="scan-hint">📷 카드를 비춰주세요</div>
 
-<button id="attack-btn">⚡ THUNDER PUNCH ⚡</button>
+<button id="attack-btn">⚡ ATTACK 🔥</button>
 
 <div id="status-overlay" class="active">
   <div class="status-card" id="status-content">
@@ -219,6 +219,30 @@ if (typeof MindARThree !== 'function') {
   hideStatus();
   startBtn.disabled = false;
   startBtn.textContent = '⚡ START ⚡';
+}
+
+// =========================================
+// 🔥 화염 입자 (리자몽 입에서 분사)
+// =========================================
+function createFireParticle() {
+  const geometry = new THREE.SphereGeometry(0.04, 8, 8);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xff6600,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const particle = new THREE.Mesh(geometry, material);
+  particle.userData.life = 1.0;
+  particle.userData.maxLife = 0.5 + Math.random() * 0.3;
+  // 입에서 앞으로 + 약간 위로 분사
+  particle.userData.velocity = new THREE.Vector3(
+    (Math.random() - 0.5) * 0.5,
+    (Math.random() - 0.5) * 0.3,
+    0.8 + Math.random() * 1.0
+  );
+  return particle;
 }
 
 // =========================================
@@ -343,192 +367,240 @@ async function startAR() {
     key.position.set(2, 4, 3);
     scene.add(key);
 
-    const anchor = mindarThree.addAnchor(0);
+    // ===== 두 카드를 위한 anchor 설정 =====
+    // anchor 0 = pikachu_card.jpg, anchor 1 = charizard_card.jpg
+    const anchorPikachu = mindarThree.addAnchor(0);
+    const anchorCharizard = mindarThree.addAnchor(1);
 
-    // GLB 로드
-    showStatus(`<div class="spinner"></div><h3>LOADING MODEL</h3>`);
-    log('GLB 로딩 시작');
+    // 각 모델의 상태 저장
+    const pokemons = []; // { root, mixer, action, holoUniforms, modelMinY, modelMaxY, revealStartTime, anchor, name, color }
 
-    const loader = new GLTFLoader();
-    const gltf = await new Promise((resolve, reject) => {
-      loader.load('./assets/pikachu.glb', resolve, undefined, reject);
-    });
+    // ===== 공통 모델 로드 함수 =====
+    async function loadPokemon(config) {
+      log(`${config.name} GLB 로딩...`);
 
-    log(`GLB 로드 완료, animations=${gltf.animations.length}`);
+      const loader = new GLTFLoader();
+      const gltf = await new Promise((resolve, reject) => {
+        loader.load(config.glbPath, resolve, undefined, reject);
+      });
+      log(`${config.name} 로드 완료, anims=${gltf.animations.length}`);
 
-    const pikachu = gltf.scene;
+      const model = gltf.scene;
 
-    // 머티리얼 보정 + 홀로그램 등장 효과 추가
-    const holoUniforms = []; // 모든 머티리얼의 uniform 추적
-    pikachu.traverse((child) => {
-      if (child.isMesh && child.material) {
-        child.material.side = THREE.DoubleSide;
-        child.material.transparent = true; // 등장 효과 위해
-        if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {
-          child.material.metalness = Math.min(child.material.metalness || 0, 0.1);
-          child.material.envMapIntensity = 1.0;
-        }
+      // 머티리얼 + 홀로그램 셰이더
+      const holoUniforms = [];
+      model.traverse((child) => {
+        if (child.isMesh && child.material) {
+          child.material.side = THREE.DoubleSide;
+          child.material.transparent = true;
+          if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {
+            child.material.metalness = Math.min(child.material.metalness || 0, 0.1);
+            child.material.envMapIntensity = 1.0;
+          }
 
-        // 🌟 홀로그램 등장 효과 셰이더 주입
-        // uReveal: 0=완전 홀로그램(파란색만), 1=완전 일반(원본 색)
-        // uScanY: 스캔 라인 위치 (아래→위)
-        const revealUniform = { value: 0.0 };
-        const scanUniform = { value: 0.0 };
-        holoUniforms.push({ reveal: revealUniform, scan: scanUniform });
+          const revealUniform = { value: 0.0 };
+          const scanUniform = { value: 0.0 };
+          const holoColor = config.holoColor || new THREE.Color(0.4, 0.9, 1.0);
+          holoUniforms.push({ reveal: revealUniform, scan: scanUniform });
 
-        child.material.onBeforeCompile = (shader) => {
-          shader.uniforms.uReveal = revealUniform;
-          shader.uniforms.uScanY = scanUniform;
+          child.material.onBeforeCompile = (shader) => {
+            shader.uniforms.uReveal = revealUniform;
+            shader.uniforms.uScanY = scanUniform;
+            shader.uniforms.uHoloColor = { value: holoColor };
 
-          // varying 추가 (vertex에서 fragment로 worldY 전달)
-          shader.vertexShader = shader.vertexShader.replace(
-            '#include <common>',
-            `#include <common>
-             varying float vWorldY;`
-          );
-          shader.vertexShader = shader.vertexShader.replace(
-            '#include <begin_vertex>',
-            `#include <begin_vertex>
-             vec4 wp = modelMatrix * vec4(transformed, 1.0);
-             vWorldY = wp.y;`
-          );
+            shader.vertexShader = shader.vertexShader.replace(
+              '#include <common>',
+              `#include <common>
+               varying float vWorldY;`
+            );
+            shader.vertexShader = shader.vertexShader.replace(
+              '#include <begin_vertex>',
+              `#include <begin_vertex>
+               vec4 wp = modelMatrix * vec4(transformed, 1.0);
+               vWorldY = wp.y;`
+            );
+            shader.fragmentShader = shader.fragmentShader.replace(
+              '#include <common>',
+              `#include <common>
+               uniform float uReveal;
+               uniform float uScanY;
+               uniform vec3 uHoloColor;
+               varying float vWorldY;`
+            );
+            shader.fragmentShader = shader.fragmentShader.replace(
+              '#include <dithering_fragment>',
+              `#include <dithering_fragment>
+               float scanDist = vWorldY - uScanY;
+               if (scanDist > 0.05) discard;
 
-          // fragment에서 색 합성
-          shader.fragmentShader = shader.fragmentShader.replace(
-            '#include <common>',
-            `#include <common>
-             uniform float uReveal;
-             uniform float uScanY;
-             varying float vWorldY;`
-          );
-          shader.fragmentShader = shader.fragmentShader.replace(
-            '#include <dithering_fragment>',
-            `#include <dithering_fragment>
+               vec3 scanGlow = vec3(1.0, 1.0, 0.4);
+               float scanIntensity = exp(-abs(scanDist) * 30.0);
+               gl_FragColor.rgb = mix(gl_FragColor.rgb, scanGlow, scanIntensity * (1.0 - uReveal));
 
-             // 홀로그램 등장 효과
-             // uScanY 아래는 일반 색, 위는 홀로그램 효과
-             float scanDist = vWorldY - uScanY;
-
-             // 스캔 라인에서 위쪽: 보이지도 않음 (아직 등장 전)
-             if (scanDist > 0.05) {
-               discard;
-             }
-
-             // 스캔 라인 근처: 밝은 노란 빛 (등장하는 순간)
-             vec3 scanGlow = vec3(1.0, 1.0, 0.4);
-             float scanIntensity = exp(-abs(scanDist) * 30.0);
-             gl_FragColor.rgb = mix(gl_FragColor.rgb, scanGlow, scanIntensity * (1.0 - uReveal));
-
-             // uReveal에 따라 홀로그램 → 일반 색 전환
-             if (uReveal < 1.0) {
-               // 홀로그램 모드: 파란/노란 톤 + 스캔라인
-               vec3 holoColor = vec3(0.4, 0.9, 1.0); // 청록색
-               float scanlines = sin(vWorldY * 80.0 - uScanY * 10.0) * 0.5 + 0.5;
-               scanlines = pow(scanlines, 3.0);
-               vec3 holoTint = mix(holoColor, gl_FragColor.rgb, uReveal);
-               gl_FragColor.rgb = mix(holoTint + scanlines * 0.3, gl_FragColor.rgb, uReveal);
-               gl_FragColor.a *= 0.6 + uReveal * 0.4;
-             }
-            `
-          );
-        };
-        child.material.needsUpdate = true;
-      }
-    });
-
-    // 사이즈 자동 조정
-    const box = new THREE.Box3().setFromObject(pikachu);
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const scaleFactor = 0.7 / maxDim;
-    pikachu.scale.setScalar(scaleFactor);
-    log(`Scale: ${scaleFactor.toFixed(4)}`);
-
-    // 발 위치 보정
-    box.setFromObject(pikachu);
-    pikachu.position.y -= box.min.y;
-
-    // 모델 그룹 (카드 평면에 맞춰 회전)
-    const modelGroup = new THREE.Group();
-    modelGroup.add(pikachu);
-    modelGroup.rotation.x = Math.PI / 2; // Y-up → 카드 위로 세움
-    modelGroup.position.z = 0.0;
-
-    // ===== 애니메이션 셋업 =====
-    if (gltf.animations && gltf.animations.length > 0) {
-      const clip = gltf.animations[0];
-      log(`✅ Clip: "${clip.name}"`);
-      log(`   duration=${clip.duration.toFixed(2)}s tracks=${clip.tracks.length}`);
-
-      // 🔑 핵심: mixer를 gltf.scene 루트에 연결 (본 시스템 작동)
-      mixer = new THREE.AnimationMixer(gltf.scene);
-
-      punchAction = mixer.clipAction(clip);
-      punchAction.setLoop(THREE.LoopOnce);
-      punchAction.clampWhenFinished = false; // ❌ 끝 프레임 유지 안함
-      punchAction.enabled = true;
-      punchAction.weight = 1.0;
-      punchAction.timeScale = 1.0;
-
-      // 펀치 종료 이벤트 — 끝나면 자세 리셋
-      mixer.addEventListener('finished', (e) => {
-        if (e.action === punchAction) {
-          log('  애니 종료 → 자세 리셋');
-          punchAction.stop();
-          punchAction.reset();
-          punchAction.time = 0;
-          punchAction.weight = 0; // 영향력 0 (T-pose도 아닌, GLB 원본 자세로)
-          mixer.update(0); // 즉시 적용
+               if (uReveal < 1.0) {
+                 float scanlines = sin(vWorldY * 80.0 - uScanY * 10.0) * 0.5 + 0.5;
+                 scanlines = pow(scanlines, 3.0);
+                 vec3 holoTint = mix(uHoloColor, gl_FragColor.rgb, uReveal);
+                 gl_FragColor.rgb = mix(holoTint + scanlines * 0.3, gl_FragColor.rgb, uReveal);
+                 gl_FragColor.a *= 0.6 + uReveal * 0.4;
+               }
+              `
+            );
+          };
+          child.material.needsUpdate = true;
         }
       });
 
-      log('Mixer + action 준비 완료');
-    } else {
-      log('⚠️ GLB에 애니메이션 없음', 'warn');
-    }
+      // 사이즈 조정
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const scaleFactor = (config.targetSize || 0.7) / maxDim;
+      model.scale.setScalar(scaleFactor);
 
-    anchor.group.add(modelGroup);
-    pikachuRoot = modelGroup;
+      // 발 보정
+      box.setFromObject(model);
+      model.position.y -= box.min.y;
 
-    // 전기 오라 추가 (피카츄 주변 약한 글로우)
-    const electricAura = createElectricAura();
-    electricAura.position.z = 0.4; // 피카츄 가슴 높이쯤
-    anchor.group.add(electricAura);
-    pikachuRoot.userData.aura = electricAura;
+      // 그룹 + 카드 회전
+      const modelGroup = new THREE.Group();
+      modelGroup.add(model);
+      modelGroup.rotation.x = Math.PI / 2;
+      modelGroup.position.z = 0.0;
 
-    // 모델 그룹의 bbox 계산 (스캔 라인 범위)
-    box.setFromObject(pikachu);
-    const modelMinY = box.min.y;
-    const modelMaxY = box.max.y;
-    log(`Model Y range: ${modelMinY.toFixed(2)} ~ ${modelMaxY.toFixed(2)}`);
+      // bbox
+      box.setFromObject(model);
+      const modelMinY = box.min.y;
+      const modelMaxY = box.max.y;
 
-    // ===== 이벤트 =====
-    let revealStartTime = -1;
+      // 애니메이션
+      let mixer = null, action = null;
+      if (gltf.animations && gltf.animations.length > 0) {
+        mixer = new THREE.AnimationMixer(gltf.scene);
+        action = mixer.clipAction(gltf.animations[0]);
+        action.setLoop(THREE.LoopOnce);
+        action.clampWhenFinished = false;
+        action.enabled = true;
+        action.weight = 1.0;
+        action.timeScale = 1.0;
 
-    anchor.onTargetFound = () => {
-      log('🎯 카드 인식');
-      scanHint.classList.remove('active');
-      attackBtn.classList.add('active');
-      // 홀로그램 등장 효과 시작 (아래에서 위로)
-      revealStartTime = performance.now();
-    };
-    anchor.onTargetLost = () => {
-      log('❌ 카드 사라짐');
-      scanHint.classList.add('active');
-      attackBtn.classList.remove('active');
-      // 다시 홀로그램 상태로 리셋
+        mixer.addEventListener('finished', (e) => {
+          if (e.action === action) {
+            action.stop();
+            action.reset();
+            action.time = 0;
+            action.weight = 0;
+            mixer.update(0);
+          }
+        });
+      }
+
+      // 리자몽 날개와 화염 메시 찾기
+      if (config.name === 'Charizard') {
+        config.parts = {};
+        model.traverse((child) => {
+          if (child.name === 'alas') config.parts.wings = child;
+          if (child.name === 'llama') config.parts.tailFlame = child;
+          if (child.name === 'cabeza') config.parts.head = child;
+          if (child.name === 'lengua') config.parts.tongue = child;
+        });
+        log(`Charizard parts: wings=${!!config.parts.wings} flame=${!!config.parts.tailFlame} head=${!!config.parts.head}`);
+      }
+
+      config.anchor.group.add(modelGroup);
+
+      // 오라 추가
+      const aura = createElectricAura();
+      aura.position.z = 0.4;
+      // 리자몽은 빨강 화염, 피카츄는 노랑 전기
+      if (config.auraColor) {
+        aura.userData.aura.material.uniforms.uColor = { value: config.auraColor };
+      }
+      config.anchor.group.add(aura);
+
+      // 초기 가려진 상태
       holoUniforms.forEach(u => {
         u.reveal.value = 0.0;
         u.scan.value = modelMinY - 0.1;
       });
-      revealStartTime = -1;
-    };
 
-    // 초기 상태: 완전 가려진 상태 (스캔 시작 전)
-    holoUniforms.forEach(u => {
-      u.reveal.value = 0.0;
-      u.scan.value = modelMinY - 0.1;
-    });
+      const pokemon = {
+        name: config.name,
+        root: modelGroup,
+        mixer, action,
+        holoUniforms,
+        modelMinY, modelMaxY,
+        revealStartTime: -1,
+        anchor: config.anchor,
+        aura,
+        sparks: [],
+        flames: [], // 리자몽 화염 입자
+        isAttacking: false,
+        parts: config.parts || {}, // 리자몽 날개/화염 메시 참조
+      };
+
+      // 카드 인식 이벤트
+      config.anchor.onTargetFound = () => {
+        log(`🎯 ${config.name} 카드 인식`);
+        pokemon.revealStartTime = performance.now();
+        updateAttackButtons();
+      };
+      config.anchor.onTargetLost = () => {
+        log(`❌ ${config.name} 카드 사라짐`);
+        holoUniforms.forEach(u => {
+          u.reveal.value = 0.0;
+          u.scan.value = modelMinY - 0.1;
+        });
+        pokemon.revealStartTime = -1;
+        updateAttackButtons();
+      };
+
+      pokemons.push(pokemon);
+      return pokemon;
+    }
+
+    // ===== GLB 로드 (병렬) =====
+    showStatus(`<div class="spinner"></div><h3>LOADING POKEMONS</h3>`);
+
+    await Promise.all([
+      loadPokemon({
+        name: 'Pikachu',
+        glbPath: './assets/pikachu.glb',
+        anchor: anchorPikachu,
+        holoColor: new THREE.Color(0.4, 0.9, 1.0), // 청록
+        targetSize: 0.7,
+      }),
+      loadPokemon({
+        name: 'Charizard',
+        glbPath: './assets/charizard.glb',
+        anchor: anchorCharizard,
+        holoColor: new THREE.Color(1.0, 0.6, 0.2), // 주황 (화염)
+        targetSize: 0.9, // 리자몽 좀 더 크게
+      })
+    ]);
+
+    log(`✅ 모든 포켓몬 로드 완료 (${pokemons.length}마리)`);
+    window._pokemons = pokemons; // triggerPunch에서 접근
+
+    // 첫 번째 포켓몬을 기본 attack 타겟으로 (피카츄)
+    const pikachuPoke = pokemons.find(p => p.name === 'Pikachu');
+    pikachuRoot = pikachuPoke ? pikachuPoke.root : null;
+    if (pikachuPoke) {
+      mixer = pikachuPoke.mixer;
+      punchAction = pikachuPoke.action;
+    }
+
+    // 카드 인식 상태에 따라 공격 버튼 업데이트
+    function updateAttackButtons() {
+      const anyVisible = pokemons.some(p => p.revealStartTime > 0);
+      if (anyVisible) {
+        scanHint.classList.remove('active');
+        attackBtn.classList.add('active');
+      } else {
+        scanHint.classList.add('active');
+        attackBtn.classList.remove('active');
+      }
+    }
 
     attackBtn.addEventListener('click', triggerPunch);
 
@@ -543,58 +615,100 @@ async function startAR() {
       const dt = clock.getDelta();
       const t = clock.getElapsedTime();
 
-      // 🔑 mixer.update 매 프레임 호출
-      if (mixer) mixer.update(dt);
+      // 모든 포켓몬 업데이트
+      pokemons.forEach(p => {
+        // mixer
+        if (p.mixer) p.mixer.update(dt);
 
-      // 🌟 홀로그램 등장 효과 진행
-      if (revealStartTime > 0) {
-        const elapsed = (performance.now() - revealStartTime) / 1000;
-        const totalDuration = 2.0; // 2초 동안 등장
-
-        if (elapsed < totalDuration) {
-          // 1단계 (0~1.5초): 스캔 라인이 아래에서 위로 이동
-          // 2단계 (1.5~2.0초): reveal 0→1 (홀로그램 → 원본 색)
-          const scanProgress = Math.min(1, elapsed / 1.5);
-          const scanY = modelMinY + (modelMaxY - modelMinY + 0.1) * scanProgress;
-
-          let revealValue = 0;
-          if (elapsed > 1.0) {
-            revealValue = Math.min(1, (elapsed - 1.0) / 1.0);
+        // 🔥 리자몽 전용: 날개짓 + 꼬리 화염 깜빡
+        if (p.name === 'Charizard' && p.parts) {
+          // 날개짓 (z축 회전, 위아래로 펄럭)
+          if (p.parts.wings) {
+            const flapSpeed = p.isAttacking ? 8 : 3;
+            const flapAmount = p.isAttacking ? 0.4 : 0.2;
+            p.parts.wings.rotation.z = Math.sin(t * flapSpeed) * flapAmount;
           }
-
-          holoUniforms.forEach(u => {
-            u.scan.value = scanY;
-            u.reveal.value = revealValue;
-          });
-        } else {
-          // 등장 완료
-          holoUniforms.forEach(u => {
-            u.scan.value = modelMaxY + 1.0; // 매우 위로 (영향 없음)
-            u.reveal.value = 1.0;
-          });
+          // 꼬리 화염 깜빡 (스케일)
+          if (p.parts.tailFlame) {
+            const flicker = 0.9 + Math.sin(t * 12) * 0.1 + Math.sin(t * 25) * 0.05;
+            p.parts.tailFlame.scale.set(flicker, flicker * (1 + Math.sin(t * 8) * 0.15), flicker);
+          }
+          // 머리 살짝 위아래
+          if (p.parts.head && !p.isAttacking) {
+            p.parts.head.rotation.x = Math.sin(t * 1.5) * 0.05;
+          }
         }
-      }
 
-      // 전기 오라 업데이트
-      if (pikachuRoot && pikachuRoot.userData.aura) {
-        const auraGroup = pikachuRoot.userData.aura;
-        auraGroup.userData.aura.material.uniforms.uTime.value = t;
-        const intensity = isAttacking ? 0.8 : 0.25 + Math.sin(t * 2.5) * 0.1;
-        auraGroup.userData.aura.material.uniforms.uIntensity.value = intensity;
-      }
+        // 홀로그램 등장 효과
+        if (p.revealStartTime > 0) {
+          const elapsed = (performance.now() - p.revealStartTime) / 1000;
+          const totalDuration = 2.0;
 
-      // 지지직 번개 페이드아웃
-      for (let i = sparks.length - 1; i >= 0; i--) {
-        const s = sparks[i];
-        s.userData.life -= dt / s.userData.maxLife;
-        s.material.opacity = Math.max(0, s.userData.life);
-        if (s.userData.life <= 0) {
-          anchor.group.remove(s);
-          s.geometry.dispose();
-          s.material.dispose();
-          sparks.splice(i, 1);
+          if (elapsed < totalDuration) {
+            const scanProgress = Math.min(1, elapsed / 1.5);
+            const scanY = p.modelMinY + (p.modelMaxY - p.modelMinY + 0.1) * scanProgress;
+            let revealValue = 0;
+            if (elapsed > 1.0) revealValue = Math.min(1, (elapsed - 1.0) / 1.0);
+
+            p.holoUniforms.forEach(u => {
+              u.scan.value = scanY;
+              u.reveal.value = revealValue;
+            });
+          } else {
+            p.holoUniforms.forEach(u => {
+              u.scan.value = p.modelMaxY + 1.0;
+              u.reveal.value = 1.0;
+            });
+          }
         }
-      }
+
+        // 오라
+        if (p.aura) {
+          p.aura.userData.aura.material.uniforms.uTime.value = t;
+          const intensity = p.isAttacking ? 0.8 : 0.25 + Math.sin(t * 2.5) * 0.1;
+          p.aura.userData.aura.material.uniforms.uIntensity.value = intensity;
+        }
+
+        // 스파크 페이드아웃
+        for (let i = p.sparks.length - 1; i >= 0; i--) {
+          const s = p.sparks[i];
+          s.userData.life -= dt / s.userData.maxLife;
+          s.material.opacity = Math.max(0, s.userData.life);
+          if (s.userData.life <= 0) {
+            p.anchor.group.remove(s);
+            s.geometry.dispose();
+            s.material.dispose();
+            p.sparks.splice(i, 1);
+          }
+        }
+
+        // 🔥 화염 입자 업데이트 (리자몽)
+        for (let i = p.flames.length - 1; i >= 0; i--) {
+          const f = p.flames[i];
+          f.userData.life -= dt / f.userData.maxLife;
+          // 위치 이동 (속도 + 중력 살짝)
+          f.position.x += f.userData.velocity.x * dt;
+          f.position.y += f.userData.velocity.y * dt;
+          f.position.z += f.userData.velocity.z * dt;
+          // 점점 느려짐
+          f.userData.velocity.multiplyScalar(0.95);
+          // 페이드 + 색 변화 (주황 → 빨강 → 검정)
+          const lifeRatio = Math.max(0, f.userData.life);
+          f.material.opacity = lifeRatio * 0.9;
+          // 점점 작아지면서 검붉어짐
+          const scale = 0.5 + lifeRatio * 1.5;
+          f.scale.set(scale, scale, scale);
+          if (lifeRatio < 0.5) {
+            f.material.color.setRGB(1.0, 0.3 * lifeRatio * 2, 0);
+          }
+          if (f.userData.life <= 0) {
+            p.anchor.group.remove(f);
+            f.geometry.dispose();
+            f.material.dispose();
+            p.flames.splice(i, 1);
+          }
+        }
+      });
 
       renderer.render(scene, camera);
     });
@@ -610,71 +724,95 @@ async function startAR() {
 }
 
 // =========================================
-// 🥊 THUNDER PUNCH (단순화: GLB 애니 + 지지직 번개만)
+// 🥊 THUNDER PUNCH (보이는 모든 포켓몬 동시 공격)
 // =========================================
 let isAttacking = false;
 let punchClickCount = 0;
 
 function triggerPunch() {
   if (isAttacking) return;
+  // pokemons는 클로저에서 접근 (window에 노출)
+  const pokemons = window._pokemons || [];
+  const visiblePokemons = pokemons.filter(p => p.revealStartTime > 0);
+  if (visiblePokemons.length === 0) return;
+
   isAttacking = true;
   punchClickCount++;
 
-  log(`🥊 PUNCH #${punchClickCount}`);
+  log(`🥊 ATTACK #${punchClickCount} (${visiblePokemons.length} pokemon)`);
 
-  // 진동
   if (navigator.vibrate) navigator.vibrate([50, 30, 100]);
 
-  // ===== GLB 애니메이션 재생 =====
-  if (punchAction && mixer) {
-    // 강제로 처음부터 재생
-    punchAction.stop();
-    punchAction.reset();
-    punchAction.enabled = true;
-    punchAction.paused = false;
-    punchAction.weight = 1.0;
-    punchAction.timeScale = 1.0;
-    punchAction.time = 0;
-    punchAction.play();
+  // 각 보이는 포켓몬 공격
+  visiblePokemons.forEach(p => {
+    p.isAttacking = true;
 
-    log(`  action.isRunning=${punchAction.isRunning()}`);
-    log(`  action.weight=${punchAction.weight}`);
-    log(`  action.time=${punchAction.time.toFixed(2)}`);
-
-    // 0.1초 후 다시 체크 (실제로 진행되는지)
-    setTimeout(() => {
-      log(`  +0.1s: time=${punchAction.time.toFixed(2)} running=${punchAction.isRunning()}`);
-    }, 100);
-  } else {
-    log('⚠️ punchAction이 없음', 'err');
-  }
-
-  // ===== 얇은 지지직 번개 (sparks) =====
-  // 펀치 동안 0~1.5초 사이에 무작위로 짧은 스파크들 발생
-  const arGroup = pikachuRoot.parent;
-  const sparkInterval = setInterval(() => {
-    // 피카츄 주변 랜덤 위치에서 짧은 번개
-    for (let i = 0; i < 3; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r1 = 0.2 + Math.random() * 0.2;
-      const r2 = r1 + 0.15 + Math.random() * 0.15;
-      const z1 = 0.2 + Math.random() * 0.6;
-      const z2 = z1 + (Math.random() - 0.5) * 0.3;
-
-      const start = new THREE.Vector3(Math.cos(angle) * r1, Math.sin(angle) * r1, z1);
-      const end = new THREE.Vector3(Math.cos(angle) * r2, Math.sin(angle) * r2, z2);
-
-      const spark = createSpark(start, end);
-      arGroup.add(spark);
-      sparks.push(spark);
+    // 애니메이션 (있으면)
+    if (p.action && p.mixer) {
+      p.action.stop();
+      p.action.reset();
+      p.action.enabled = true;
+      p.action.paused = false;
+      p.action.weight = 1.0;
+      p.action.timeScale = 1.0;
+      p.action.time = 0;
+      p.action.play();
     }
-  }, 80);
 
-  // 1.5초 후 종료
+    const arGroup = p.anchor.group;
+
+    if (p.name === 'Pikachu') {
+      // ⚡ 피카츄: 전기 스파크
+      const sparkInterval = setInterval(() => {
+        for (let i = 0; i < 3; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const r1 = 0.2 + Math.random() * 0.2;
+          const r2 = r1 + 0.15 + Math.random() * 0.15;
+          const z1 = 0.2 + Math.random() * 0.6;
+          const z2 = z1 + (Math.random() - 0.5) * 0.3;
+          const start = new THREE.Vector3(Math.cos(angle) * r1, Math.sin(angle) * r1, z1);
+          const end = new THREE.Vector3(Math.cos(angle) * r2, Math.sin(angle) * r2, z2);
+          const spark = createSpark(start, end);
+          arGroup.add(spark);
+          p.sparks.push(spark);
+        }
+      }, 80);
+
+      setTimeout(() => {
+        clearInterval(sparkInterval);
+        p.isAttacking = false;
+      }, 1500);
+    } else if (p.name === 'Charizard') {
+      // 🔥 리자몽: 입에서 화염 분사 (Fire Spin!)
+      const flameInterval = setInterval(() => {
+        // 입 위치쯤 (모델 정면 살짝 위쪽)
+        const mouthX = (Math.random() - 0.5) * 0.1;
+        const mouthY = (Math.random() - 0.5) * 0.1;
+        const mouthZ = 0.6; // 머리 높이쯤
+
+        for (let i = 0; i < 5; i++) {
+          const flame = createFireParticle();
+          flame.position.set(mouthX, mouthY, mouthZ);
+          // 입 앞쪽으로 빠르게 분사 (z+ 방향)
+          flame.userData.velocity = new THREE.Vector3(
+            (Math.random() - 0.5) * 0.6,
+            (Math.random() - 0.5) * 0.6,
+            1.2 + Math.random() * 1.5
+          );
+          arGroup.add(flame);
+          p.flames.push(flame);
+        }
+      }, 50);
+
+      setTimeout(() => {
+        clearInterval(flameInterval);
+        p.isAttacking = false;
+      }, 1500);
+    }
+  });
+
   setTimeout(() => {
-    clearInterval(sparkInterval);
     isAttacking = false;
-    log(`  PUNCH 완료`);
   }, 1500);
 }
 
