@@ -520,13 +520,16 @@ async function startAR() {
             if (n.match(/Wing/i)) {
               config.parts.wingBones.push(child);
             }
-            // 꼬리 본 (Tail1~7)
-            if (n.match(/^Tail\d/i) || n.match(/TailA0\d/i)) {
+            // 꼬리 본 (Tail1~7만, TailA는 제외 — 충돌 방지)
+            if (n.match(/^Tail[1-9]/i)) {
               config.parts.tailBones.push(child);
+              // 초기 회전 저장 (베이스 포즈)
+              child.userData.baseRotY = child.rotation.y;
             }
             // 화염 본 (FireCore, FireA)
             if (n.match(/Fire/i)) {
               config.parts.fireBones.push(child);
+              child.userData.baseScale = child.scale.x;
             }
           }
         });
@@ -593,7 +596,7 @@ async function startAR() {
         glbPath: './assets/charizard.glb',
         anchor: anchorCharizard,
         holoColor: new THREE.Color(1.0, 0.6, 0.2), // 주황 (화염)
-        targetSize: 0.9, // 리자몽 좀 더 크게
+        targetSize: 1.4, // 리자몽 위풍당당하게
       })
     ]);
 
@@ -638,29 +641,40 @@ async function startAR() {
         // mixer
         if (p.mixer) p.mixer.update(dt);
 
-        // 🔥 리자몽 전용: 날개짓 + 꼬리 흔들기 + 화염 깜빡
+        // 🔥 리자몽 전용: 떠다니기 + 날개짓 + 꼬리 흔들기 + 화염 깜빡
         if (p.name === 'Charizard' && p.parts) {
-          // 날개짓 (z축 회전)
+          // 🪂 떠다니기 (위아래 부드럽게 + 미세 회전)
+          if (!p.isAttacking) {
+            p.root.position.y = Math.sin(t * 1.2) * 0.08; // 위아래 8cm 부드럽게
+            p.root.rotation.y = Math.sin(t * 0.6) * 0.05; // 살짝 좌우 기울임
+          } else {
+            // 공격 시 약간 위로 올라감 (위협적인 자세)
+            p.root.position.y = 0.15 + Math.sin(t * 8) * 0.05;
+          }
+
+          // 날개짓 (z축 회전) — 더 자연스럽게
           if (p.parts.wingBones && p.parts.wingBones.length > 0) {
-            const flapSpeed = p.isAttacking ? 8 : 3;
-            const flapAmount = p.isAttacking ? 0.5 : 0.25;
+            const flapSpeed = p.isAttacking ? 10 : 4; // 평소 4Hz로 부드럽게
+            const flapAmount = p.isAttacking ? 0.6 : 0.35; // 평소도 보이는 만큼
             p.parts.wingBones.forEach((bone, i) => {
-              // 본별로 살짝 다른 위상 (자연스럽게 펄럭)
-              const phase = i * 0.15;
+              const phase = i * 0.1;
               bone.rotation.z = Math.sin(t * flapSpeed + phase) * flapAmount;
             });
           }
-          // 꼬리 흔들기 (각 본을 sin파로 회전 - 웨이브 효과)
+          // 꼬리 흔들기 - 베이스 포즈 기준 + 부드러운 웨이브
           if (p.parts.tailBones && p.parts.tailBones.length > 0) {
             p.parts.tailBones.forEach((bone, i) => {
-              const phase = i * 0.3;
-              bone.rotation.y = Math.sin(t * 2 + phase) * 0.08;
+              const phase = i * 0.4;
+              const baseY = bone.userData.baseRotY || 0;
+              // 베이스 포즈 + sin파 (작은 진폭)
+              bone.rotation.y = baseY + Math.sin(t * 1.5 + phase) * 0.06;
             });
           }
-          // 화염 본 깜빡 (스케일)
+          // 화염 본 깜빡 (베이스 스케일 기준)
           if (p.parts.fireBones && p.parts.fireBones.length > 0) {
             p.parts.fireBones.forEach((bone, i) => {
-              const flicker = 0.85 + Math.sin(t * 15 + i) * 0.15 + Math.sin(t * 28 + i) * 0.05;
+              const baseScale = bone.userData.baseScale || 1;
+              const flicker = baseScale * (0.9 + Math.sin(t * 12 + i) * 0.1);
               bone.scale.set(flicker, flicker, flicker);
             });
           }
@@ -790,20 +804,31 @@ function triggerPunch() {
       }, 1500);
     } else if (p.name === 'Charizard') {
       // 🔥 리자몽: 입에서 화염 분사 (Fire Spin!)
-      const flameInterval = setInterval(() => {
-        // 입 위치쯤 (모델 정면 살짝 위쪽)
-        const mouthX = (Math.random() - 0.5) * 0.1;
-        const mouthY = (Math.random() - 0.5) * 0.1;
-        const mouthZ = 0.6; // 머리 높이쯤
+      // 모델 회전(rotation.x = PI/2) 후 좌표:
+      //   원본 Y (높이) → 카드 평면의 Z (위쪽)
+      //   원본 Z (앞뒤) → 카드 평면의 -Y (앞쪽)
+      // 입 위치: 원본 X=0, Y=140 (위), Z=80 (앞)
+      // 회전 후: X=0, Y=-80, Z=140 → scale 적용 필요
 
+      // modelGroup 안에 있는 inner model의 scale 사용
+      const innerModel = p.root.children[0];
+      const modelScale = innerModel ? innerModel.scale.x : 0.005;
+      const mouthOffsetY = -80 * modelScale;  // 앞으로 (음수 Y)
+      const mouthOffsetZ = 140 * modelScale;  // 위로 (머리 높이)
+
+      const flameInterval = setInterval(() => {
         for (let i = 0; i < 5; i++) {
           const flame = createFireParticle();
-          flame.position.set(mouthX, mouthY, mouthZ);
-          // 입 앞쪽으로 빠르게 분사 (z+ 방향)
+          flame.position.set(
+            (Math.random() - 0.5) * 0.05,
+            mouthOffsetY + (Math.random() - 0.5) * 0.05,
+            mouthOffsetZ + (Math.random() - 0.5) * 0.05
+          );
+          // 입 앞쪽으로 분사 (-Y 방향)
           flame.userData.velocity = new THREE.Vector3(
-            (Math.random() - 0.5) * 0.6,
-            (Math.random() - 0.5) * 0.6,
-            1.2 + Math.random() * 1.5
+            (Math.random() - 0.5) * 0.4,
+            -1.0 - Math.random() * 1.2, // -Y로 빠르게 (앞쪽)
+            (Math.random() - 0.5) * 0.3
           );
           arGroup.add(flame);
           p.flames.push(flame);
