@@ -412,13 +412,29 @@ async function startAR() {
       });
 
       // 사이즈 조정 - 메시만 측정 (본/skeleton 제외)
+      // 중요: matrix update 강제 호출해야 정확한 박스 얻음
+      model.updateMatrixWorld(true);
+
       const box = new THREE.Box3();
       let meshCount = 0;
       model.traverse((child) => {
-        if (child.isMesh) {
+        if (child.isMesh && !child.isSkinnedMesh) {
+          // 일반 메시: bounding box 직접 측정
           const meshBox = new THREE.Box3().setFromObject(child);
           if (!meshBox.isEmpty()) {
             box.union(meshBox);
+            meshCount++;
+          }
+        } else if (child.isSkinnedMesh) {
+          // SkinnedMesh: geometry의 bounding box 사용 (deform 결과)
+          if (!child.geometry.boundingBox) {
+            child.geometry.computeBoundingBox();
+          }
+          const localBox = child.geometry.boundingBox.clone();
+          // world 좌표로 변환
+          localBox.applyMatrix4(child.matrixWorld);
+          if (!localBox.isEmpty()) {
+            box.union(localBox);
             meshCount++;
           }
         }
@@ -427,14 +443,20 @@ async function startAR() {
       const maxDim = Math.max(size.x, size.y, size.z);
       const scaleFactor = (config.targetSize || 0.7) / maxDim;
       model.scale.setScalar(scaleFactor);
-      log(`${config.name} meshes=${meshCount} maxDim=${maxDim.toFixed(2)} scale=${scaleFactor.toFixed(4)}`);
+      log(`${config.name} meshes=${meshCount} maxDim=${maxDim.toFixed(0)} scale=${scaleFactor.toFixed(4)}`);
 
-      // 발 보정 + 중심 정렬 (메시만 측정)
+      // 발 보정 + 중심 정렬 (메시만 측정, scaling 적용 후)
+      model.updateMatrixWorld(true);
       const box2 = new THREE.Box3();
       model.traverse((child) => {
-        if (child.isMesh) {
-          const meshBox = new THREE.Box3().setFromObject(child);
-          if (!meshBox.isEmpty()) box2.union(meshBox);
+        if (child.isMesh && !child.isSkinnedMesh) {
+          const mb = new THREE.Box3().setFromObject(child);
+          if (!mb.isEmpty()) box2.union(mb);
+        } else if (child.isSkinnedMesh) {
+          if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+          const lb = child.geometry.boundingBox.clone();
+          lb.applyMatrix4(child.matrixWorld);
+          if (!lb.isEmpty()) box2.union(lb);
         }
       });
       const center = box2.getCenter(new THREE.Vector3());
@@ -450,11 +472,17 @@ async function startAR() {
       modelGroup.position.z = 0.0;
 
       // bbox (메시만)
+      model.updateMatrixWorld(true);
       const box3 = new THREE.Box3();
       model.traverse((child) => {
-        if (child.isMesh) {
-          const meshBox = new THREE.Box3().setFromObject(child);
-          if (!meshBox.isEmpty()) box3.union(meshBox);
+        if (child.isMesh && !child.isSkinnedMesh) {
+          const mb = new THREE.Box3().setFromObject(child);
+          if (!mb.isEmpty()) box3.union(mb);
+        } else if (child.isSkinnedMesh) {
+          if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+          const lb = child.geometry.boundingBox.clone();
+          lb.applyMatrix4(child.matrixWorld);
+          if (!lb.isEmpty()) box3.union(lb);
         }
       });
       const modelMinY = box3.min.y;
