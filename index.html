@@ -369,9 +369,9 @@ async function startAR() {
     scene.add(key);
 
     // ===== 두 카드를 위한 anchor 설정 =====
-    // anchor 0 = pikachu_card.jpg, anchor 1 = charizard_card.jpg
-    const anchorPikachu = mindarThree.addAnchor(0);
-    const anchorCharizard = mindarThree.addAnchor(1);
+    // ⚠️ .mind 파일 컴파일 순서대로: anchor 0 = 리자몽 카드 (왼쪽 첫 번째), anchor 1 = 피카츄 카드
+    const anchorCharizard = mindarThree.addAnchor(0);
+    const anchorPikachu = mindarThree.addAnchor(1);
 
     // 각 모델의 상태 저장
     const pokemons = []; // { root, mixer, action, holoUniforms, modelMinY, modelMaxY, revealStartTime, anchor, name, color }
