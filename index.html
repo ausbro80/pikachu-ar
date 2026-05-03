@@ -184,18 +184,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MindARThree } from 'mindar-image-three';
 
-// ===== 디버그 로그 (화면에 표시 - 임시로 켜둠) =====
+// ===== 디버그 로그 (콘솔에만, 화면 안 보임) =====
 const debugLog = document.getElementById('debug-log');
-const logs = [];
 function log(msg, type = 'info') {
   console.log(msg);
-  logs.push({ msg, type, time: new Date().toLocaleTimeString() });
-  if (logs.length > 12) logs.shift();
-  debugLog.classList.add('active');
-  debugLog.innerHTML = logs.map(l =>
-    `<div class="${l.type === 'err' ? 'err' : l.type === 'warn' ? 'warn' : ''}">${l.time.split(' ')[0]} ${l.msg}</div>`
-  ).join('');
-  debugLog.scrollTop = debugLog.scrollHeight;
 }
 
 const startScreen = document.getElementById('start-screen');
@@ -589,7 +581,7 @@ async function startAR() {
         glbPath: './assets/pikachu.glb',
         anchor: anchorPikachu,
         holoColor: new THREE.Color(0.4, 0.9, 1.0), // 청록
-        targetSize: 0.4, // 피카츄 작게
+        targetSize: 0.25, // 피카츄 작게
       }),
       loadPokemon({
         name: 'Charizard',
@@ -652,10 +644,10 @@ async function startAR() {
             p.root.position.y = 0.15 + Math.sin(t * 8) * 0.05;
           }
 
-          // 날개짓 (z축 회전) — 더 자연스럽게
+          // 날개짓 (z축 회전) — 매우 과감하게
           if (p.parts.wingBones && p.parts.wingBones.length > 0) {
-            const flapSpeed = p.isAttacking ? 10 : 4; // 평소 4Hz로 부드럽게
-            const flapAmount = p.isAttacking ? 0.6 : 0.35; // 평소도 보이는 만큼
+            const flapSpeed = p.isAttacking ? 12 : 5; // 평소 5Hz
+            const flapAmount = p.isAttacking ? 1.0 : 0.7; // 0.35 → 0.7 (2배 진폭)
             p.parts.wingBones.forEach((bone, i) => {
               const phase = i * 0.1;
               bone.rotation.z = Math.sin(t * flapSpeed + phase) * flapAmount;
@@ -706,23 +698,23 @@ async function startAR() {
         for (let i = p.flames.length - 1; i >= 0; i--) {
           const f = p.flames[i];
           f.userData.life -= dt / f.userData.maxLife;
-          // 위치 이동 (속도 + 중력 살짝)
+          // 위치 이동 (속도)
           f.position.x += f.userData.velocity.x * dt;
           f.position.y += f.userData.velocity.y * dt;
           f.position.z += f.userData.velocity.z * dt;
           // 점점 느려짐
           f.userData.velocity.multiplyScalar(0.95);
-          // 페이드 + 색 변화 (주황 → 빨강 → 검정)
+          // 페이드 + 색 변화
           const lifeRatio = Math.max(0, f.userData.life);
           f.material.opacity = lifeRatio * 0.9;
-          // 점점 작아지면서 검붉어짐
           const scale = 0.5 + lifeRatio * 1.5;
           f.scale.set(scale, scale, scale);
           if (lifeRatio < 0.5) {
             f.material.color.setRGB(1.0, 0.3 * lifeRatio * 2, 0);
           }
           if (f.userData.life <= 0) {
-            p.anchor.group.remove(f);
+            // attached 화염은 부모(innerModel)에서 제거, 아니면 anchor.group에서 제거
+            if (f.parent) f.parent.remove(f);
             f.geometry.dispose();
             f.material.dispose();
             p.flames.splice(i, 1);
@@ -803,34 +795,43 @@ function triggerPunch() {
         p.isAttacking = false;
       }, 1500);
     } else if (p.name === 'Charizard') {
-      // 🔥 리자몽: 입에서 화염 분사 (Fire Spin!)
-      // 모델 회전(rotation.x = PI/2) 후 좌표:
-      //   원본 Y (높이) → 카드 평면의 Z (위쪽)
-      //   원본 Z (앞뒤) → 카드 평면의 -Y (앞쪽)
-      // 입 위치: 원본 X=0, Y=140 (위), Z=80 (앞)
-      // 회전 후: X=0, Y=-80, Z=140 → scale 적용 필요
-
-      // modelGroup 안에 있는 inner model의 scale 사용
-      const innerModel = p.root.children[0];
+      // 🔥 리자몽: 입에서 화염 분사
+      // 모델 안에 화염을 추가 (모델과 함께 회전/이동/스케일)
+      // → 위치 계산 안 해도 자동으로 입 위치 따라감
+      const innerModel = p.root.children[0]; // gltf.scene
       const modelScale = innerModel ? innerModel.scale.x : 0.005;
-      const mouthOffsetY = -80 * modelScale;  // 앞으로 (음수 Y)
-      const mouthOffsetZ = 140 * modelScale;  // 위로 (머리 높이)
 
+      // 입은 원본 좌표계 X=0, Y=137, Z=72 (분석 결과)
+      // innerModel에 직접 추가하면 scale/rotation 다 적용됨
       const flameInterval = setInterval(() => {
-        for (let i = 0; i < 5; i++) {
-          const flame = createFireParticle();
+        for (let i = 0; i < 8; i++) {
+          // 입자를 더 크게 만들기
+          const geom = new THREE.SphereGeometry(8, 8, 8); // 원본 단위 8 = 화면에서 잘 보임
+          const mat = new THREE.MeshBasicMaterial({
+            color: new THREE.Color().setHSL(0.05 + Math.random() * 0.05, 1.0, 0.6),
+            transparent: true,
+            opacity: 1.0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          });
+          const flame = new THREE.Mesh(geom, mat);
+          // 입 위치 (원본 좌표계)
           flame.position.set(
-            (Math.random() - 0.5) * 0.05,
-            mouthOffsetY + (Math.random() - 0.5) * 0.05,
-            mouthOffsetZ + (Math.random() - 0.5) * 0.05
+            (Math.random() - 0.5) * 8,
+            137 + (Math.random() - 0.5) * 5,
+            72 + (Math.random() - 0.5) * 5
           );
-          // 입 앞쪽으로 분사 (-Y 방향)
+          // 앞쪽으로 (Z+ 방향) 분사 — 원본 좌표계 기준
           flame.userData.velocity = new THREE.Vector3(
-            (Math.random() - 0.5) * 0.4,
-            -1.0 - Math.random() * 1.2, // -Y로 빠르게 (앞쪽)
-            (Math.random() - 0.5) * 0.3
+            (Math.random() - 0.5) * 30,
+            (Math.random() - 0.5) * 20,
+            80 + Math.random() * 60 // Z+ 빠르게
           );
-          arGroup.add(flame);
+          flame.userData.life = 1.0;
+          flame.userData.maxLife = 0.5 + Math.random() * 0.3;
+          flame.userData.attached = true;
+
+          innerModel.add(flame); // 모델 안에 직접 추가!
           p.flames.push(flame);
         }
       }, 50);
