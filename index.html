@@ -348,6 +348,7 @@ async function startAR() {
     mindarThree = new MindARThree({
       container: document.querySelector('#ar-container'),
       imageTargetSrc: './assets/pikachu_card.mind',
+      maxTrack: 2, // 👈 두 카드 동시 트래킹
       uiScanning: 'no',
       uiLoading: 'no',
       uiError: 'no',
@@ -451,36 +452,8 @@ async function startAR() {
         }
       });
 
-      // 사이즈 조정 (음수 scale / 멀리 떨어진 메시 제외)
-      let box;
-      if (config.name === 'Charizard') {
-        // 리자몽 GLB는 메시들이 제각각 위치라 정확한 메인 메시들로 박스 계산
-        const mainMeshNames = ['pecho', 'cabeza', 'alas', 'cola', 'pierna', 'cuello', 'brazo'];
-        box = new THREE.Box3();
-        let foundCount = 0;
-        model.traverse((child) => {
-          if (child.isMesh && mainMeshNames.includes(child.name)) {
-            // 음수 scale 보정
-            child.scale.x = Math.abs(child.scale.x);
-            child.scale.y = Math.abs(child.scale.y);
-            child.scale.z = Math.abs(child.scale.z);
-
-            const meshBox = new THREE.Box3().setFromObject(child);
-            box.union(meshBox);
-            foundCount++;
-          }
-          // 음수 scale 메시들도 모두 양수로 (안 그러면 뒤집혀 보임)
-          if (child.isMesh) {
-            child.scale.x = Math.abs(child.scale.x);
-            child.scale.y = Math.abs(child.scale.y);
-            child.scale.z = Math.abs(child.scale.z);
-          }
-        });
-        log(`Charizard main meshes for bbox: ${foundCount}`);
-      } else {
-        box = new THREE.Box3().setFromObject(model);
-      }
-
+      // 사이즈 조정 (모든 모델 공통)
+      const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
       const scaleFactor = (config.targetSize || 0.7) / maxDim;
@@ -490,16 +463,10 @@ async function startAR() {
       // 발 보정 + 중심 정렬
       box.setFromObject(model);
       const center = box.getCenter(new THREE.Vector3());
-
-      if (config.name === 'Charizard') {
-        // 리자몽: x,z(좌우/앞뒤)는 중심으로, y는 발이 0에 오게
-        model.position.x -= center.x;
-        model.position.z -= center.z;
-        model.position.y -= box.min.y;
-      } else {
-        // 피카츄: 발을 0으로
-        model.position.y -= box.min.y;
-      }
+      // x,z(좌우/앞뒤) 중심 정렬, y는 발이 0
+      model.position.x -= center.x;
+      model.position.z -= center.z;
+      model.position.y -= box.min.y;
 
       // 그룹 + 카드 회전
       const modelGroup = new THREE.Group();
@@ -534,16 +501,27 @@ async function startAR() {
         });
       }
 
-      // 리자몽 날개와 화염 메시 찾기
+      // 리자몽 본 찾기 (새 모델: skeleton 기반, 'Wing'/'Tail'/'FireCore' 본)
       if (config.name === 'Charizard') {
-        config.parts = {};
+        config.parts = { wingBones: [], tailBones: [], fireBones: [] };
         model.traverse((child) => {
-          if (child.name === 'alas') config.parts.wings = child;
-          if (child.name === 'llama') config.parts.tailFlame = child;
-          if (child.name === 'cabeza') config.parts.head = child;
-          if (child.name === 'lengua') config.parts.tongue = child;
+          if (child.isBone || child.type === 'Bone') {
+            const n = child.name;
+            // 날개 본 (LWing*, RWing*, Wing*)
+            if (n.match(/Wing/i)) {
+              config.parts.wingBones.push(child);
+            }
+            // 꼬리 본 (Tail1~7)
+            if (n.match(/^Tail\d/i) || n.match(/TailA0\d/i)) {
+              config.parts.tailBones.push(child);
+            }
+            // 화염 본 (FireCore, FireA)
+            if (n.match(/Fire/i)) {
+              config.parts.fireBones.push(child);
+            }
+          }
         });
-        log(`Charizard parts: wings=${!!config.parts.wings} flame=${!!config.parts.tailFlame} head=${!!config.parts.head}`);
+        log(`Charizard bones: wings=${config.parts.wingBones.length} tail=${config.parts.tailBones.length} fire=${config.parts.fireBones.length}`);
       }
 
       config.anchor.group.add(modelGroup);
@@ -659,22 +637,31 @@ async function startAR() {
         // mixer
         if (p.mixer) p.mixer.update(dt);
 
-        // 🔥 리자몽 전용: 날개짓 + 꼬리 화염 깜빡
+        // 🔥 리자몽 전용: 날개짓 + 꼬리 흔들기 + 화염 깜빡
         if (p.name === 'Charizard' && p.parts) {
-          // 날개짓 (z축 회전, 위아래로 펄럭)
-          if (p.parts.wings) {
+          // 날개짓 (z축 회전)
+          if (p.parts.wingBones && p.parts.wingBones.length > 0) {
             const flapSpeed = p.isAttacking ? 8 : 3;
-            const flapAmount = p.isAttacking ? 0.4 : 0.2;
-            p.parts.wings.rotation.z = Math.sin(t * flapSpeed) * flapAmount;
+            const flapAmount = p.isAttacking ? 0.5 : 0.25;
+            p.parts.wingBones.forEach((bone, i) => {
+              // 본별로 살짝 다른 위상 (자연스럽게 펄럭)
+              const phase = i * 0.15;
+              bone.rotation.z = Math.sin(t * flapSpeed + phase) * flapAmount;
+            });
           }
-          // 꼬리 화염 깜빡 (스케일)
-          if (p.parts.tailFlame) {
-            const flicker = 0.9 + Math.sin(t * 12) * 0.1 + Math.sin(t * 25) * 0.05;
-            p.parts.tailFlame.scale.set(flicker, flicker * (1 + Math.sin(t * 8) * 0.15), flicker);
+          // 꼬리 흔들기 (각 본을 sin파로 회전 - 웨이브 효과)
+          if (p.parts.tailBones && p.parts.tailBones.length > 0) {
+            p.parts.tailBones.forEach((bone, i) => {
+              const phase = i * 0.3;
+              bone.rotation.y = Math.sin(t * 2 + phase) * 0.08;
+            });
           }
-          // 머리 살짝 위아래
-          if (p.parts.head && !p.isAttacking) {
-            p.parts.head.rotation.x = Math.sin(t * 1.5) * 0.05;
+          // 화염 본 깜빡 (스케일)
+          if (p.parts.fireBones && p.parts.fireBones.length > 0) {
+            p.parts.fireBones.forEach((bone, i) => {
+              const flicker = 0.85 + Math.sin(t * 15 + i) * 0.15 + Math.sin(t * 28 + i) * 0.05;
+              bone.scale.set(flicker, flicker, flicker);
+            });
           }
         }
 
