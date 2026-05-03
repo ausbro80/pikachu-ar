@@ -589,14 +589,14 @@ async function startAR() {
         glbPath: './assets/pikachu.glb',
         anchor: anchorPikachu,
         holoColor: new THREE.Color(0.4, 0.9, 1.0), // 청록
-        targetSize: 0.7,
+        targetSize: 0.4, // 피카츄 작게
       }),
       loadPokemon({
         name: 'Charizard',
         glbPath: './assets/charizard.glb',
         anchor: anchorCharizard,
         holoColor: new THREE.Color(1.0, 0.6, 0.2), // 주황 (화염)
-        targetSize: 1.4, // 리자몽 위풍당당하게
+        targetSize: 1.4, // 리자몽 위풍당당하게 (그대로 유지)
       })
     ]);
 
