@@ -451,16 +451,55 @@ async function startAR() {
         }
       });
 
-      // 사이즈 조정
-      const box = new THREE.Box3().setFromObject(model);
+      // 사이즈 조정 (음수 scale / 멀리 떨어진 메시 제외)
+      let box;
+      if (config.name === 'Charizard') {
+        // 리자몽 GLB는 메시들이 제각각 위치라 정확한 메인 메시들로 박스 계산
+        const mainMeshNames = ['pecho', 'cabeza', 'alas', 'cola', 'pierna', 'cuello', 'brazo'];
+        box = new THREE.Box3();
+        let foundCount = 0;
+        model.traverse((child) => {
+          if (child.isMesh && mainMeshNames.includes(child.name)) {
+            // 음수 scale 보정
+            child.scale.x = Math.abs(child.scale.x);
+            child.scale.y = Math.abs(child.scale.y);
+            child.scale.z = Math.abs(child.scale.z);
+
+            const meshBox = new THREE.Box3().setFromObject(child);
+            box.union(meshBox);
+            foundCount++;
+          }
+          // 음수 scale 메시들도 모두 양수로 (안 그러면 뒤집혀 보임)
+          if (child.isMesh) {
+            child.scale.x = Math.abs(child.scale.x);
+            child.scale.y = Math.abs(child.scale.y);
+            child.scale.z = Math.abs(child.scale.z);
+          }
+        });
+        log(`Charizard main meshes for bbox: ${foundCount}`);
+      } else {
+        box = new THREE.Box3().setFromObject(model);
+      }
+
       const size = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
       const scaleFactor = (config.targetSize || 0.7) / maxDim;
       model.scale.setScalar(scaleFactor);
+      log(`${config.name} scale: ${scaleFactor.toFixed(4)} (maxDim: ${maxDim.toFixed(2)})`);
 
-      // 발 보정
+      // 발 보정 + 중심 정렬
       box.setFromObject(model);
-      model.position.y -= box.min.y;
+      const center = box.getCenter(new THREE.Vector3());
+
+      if (config.name === 'Charizard') {
+        // 리자몽: x,z(좌우/앞뒤)는 중심으로, y는 발이 0에 오게
+        model.position.x -= center.x;
+        model.position.z -= center.z;
+        model.position.y -= box.min.y;
+      } else {
+        // 피카츄: 발을 0으로
+        model.position.y -= box.min.y;
+      }
 
       // 그룹 + 카드 회전
       const modelGroup = new THREE.Group();
