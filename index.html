@@ -399,85 +399,49 @@ async function startAR() {
 
       const model = gltf.scene;
 
-      // 머티리얼 + 홀로그램 셰이더
-      const holoUniforms = [];
+      // 머티리얼 보정 (단순화 - 홀로그램 없음)
+      const holoUniforms = []; // 빈 배열로 유지 (다른 코드 호환성용)
       model.traverse((child) => {
         if (child.isMesh && child.material) {
           child.material.side = THREE.DoubleSide;
-          child.material.transparent = true;
           if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {
             child.material.metalness = Math.min(child.material.metalness || 0, 0.1);
             child.material.envMapIntensity = 1.0;
           }
-
-          const revealUniform = { value: 0.0 };
-          const scanUniform = { value: 0.0 };
-          const holoColor = config.holoColor || new THREE.Color(0.4, 0.9, 1.0);
-          holoUniforms.push({ reveal: revealUniform, scan: scanUniform });
-
-          child.material.onBeforeCompile = (shader) => {
-            shader.uniforms.uReveal = revealUniform;
-            shader.uniforms.uScanY = scanUniform;
-            shader.uniforms.uHoloColor = { value: holoColor };
-
-            shader.vertexShader = shader.vertexShader.replace(
-              '#include <common>',
-              `#include <common>
-               varying float vWorldY;`
-            );
-            shader.vertexShader = shader.vertexShader.replace(
-              '#include <begin_vertex>',
-              `#include <begin_vertex>
-               vec4 wp = modelMatrix * vec4(transformed, 1.0);
-               vWorldY = wp.y;`
-            );
-            shader.fragmentShader = shader.fragmentShader.replace(
-              '#include <common>',
-              `#include <common>
-               uniform float uReveal;
-               uniform float uScanY;
-               uniform vec3 uHoloColor;
-               varying float vWorldY;`
-            );
-            shader.fragmentShader = shader.fragmentShader.replace(
-              '#include <dithering_fragment>',
-              `#include <dithering_fragment>
-               float scanDist = vWorldY - uScanY;
-               if (scanDist > 0.05) discard;
-
-               vec3 scanGlow = vec3(1.0, 1.0, 0.4);
-               float scanIntensity = exp(-abs(scanDist) * 30.0);
-               gl_FragColor.rgb = mix(gl_FragColor.rgb, scanGlow, scanIntensity * (1.0 - uReveal));
-
-               if (uReveal < 1.0) {
-                 float scanlines = sin(vWorldY * 80.0 - uScanY * 10.0) * 0.5 + 0.5;
-                 scanlines = pow(scanlines, 3.0);
-                 vec3 holoTint = mix(uHoloColor, gl_FragColor.rgb, uReveal);
-                 gl_FragColor.rgb = mix(holoTint + scanlines * 0.3, gl_FragColor.rgb, uReveal);
-                 gl_FragColor.a *= 0.6 + uReveal * 0.4;
-               }
-              `
-            );
-          };
-          child.material.needsUpdate = true;
         }
       });
 
-      // 사이즈 조정 (모든 모델 공통)
-      const box = new THREE.Box3().setFromObject(model);
+      // 사이즈 조정 - 메시만 측정 (본/skeleton 제외)
+      const box = new THREE.Box3();
+      let meshCount = 0;
+      model.traverse((child) => {
+        if (child.isMesh) {
+          const meshBox = new THREE.Box3().setFromObject(child);
+          if (!meshBox.isEmpty()) {
+            box.union(meshBox);
+            meshCount++;
+          }
+        }
+      });
       const size = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
       const scaleFactor = (config.targetSize || 0.7) / maxDim;
       model.scale.setScalar(scaleFactor);
-      log(`${config.name} scale: ${scaleFactor.toFixed(4)} (maxDim: ${maxDim.toFixed(2)})`);
+      log(`${config.name} meshes=${meshCount} maxDim=${maxDim.toFixed(2)} scale=${scaleFactor.toFixed(4)}`);
 
-      // 발 보정 + 중심 정렬
-      box.setFromObject(model);
-      const center = box.getCenter(new THREE.Vector3());
+      // 발 보정 + 중심 정렬 (메시만 측정)
+      const box2 = new THREE.Box3();
+      model.traverse((child) => {
+        if (child.isMesh) {
+          const meshBox = new THREE.Box3().setFromObject(child);
+          if (!meshBox.isEmpty()) box2.union(meshBox);
+        }
+      });
+      const center = box2.getCenter(new THREE.Vector3());
       // x,z(좌우/앞뒤) 중심 정렬, y는 발이 0
       model.position.x -= center.x;
       model.position.z -= center.z;
-      model.position.y -= box.min.y;
+      model.position.y -= box2.min.y;
 
       // 그룹 + 카드 회전
       const modelGroup = new THREE.Group();
@@ -485,10 +449,16 @@ async function startAR() {
       modelGroup.rotation.x = Math.PI / 2;
       modelGroup.position.z = 0.0;
 
-      // bbox
-      box.setFromObject(model);
-      const modelMinY = box.min.y;
-      const modelMaxY = box.max.y;
+      // bbox (메시만)
+      const box3 = new THREE.Box3();
+      model.traverse((child) => {
+        if (child.isMesh) {
+          const meshBox = new THREE.Box3().setFromObject(child);
+          if (!meshBox.isEmpty()) box3.union(meshBox);
+        }
+      });
+      const modelMinY = box3.min.y;
+      const modelMaxY = box3.max.y;
 
       // 애니메이션
       let mixer = null, action = null;
@@ -546,11 +516,7 @@ async function startAR() {
       }
       config.anchor.group.add(aura);
 
-      // 초기 가려진 상태
-      holoUniforms.forEach(u => {
-        u.reveal.value = 0.0;
-        u.scan.value = modelMinY - 0.1;
-      });
+      // (홀로그램 초기 상태 제거됨 - 카드 인식 시 바로 등장)
 
       const pokemon = {
         name: config.name,
@@ -570,15 +536,11 @@ async function startAR() {
       // 카드 인식 이벤트
       config.anchor.onTargetFound = () => {
         log(`🎯 ${config.name} 카드 인식`);
-        pokemon.revealStartTime = performance.now();
+        pokemon.revealStartTime = performance.now(); // 등장 시간만 기록 (오라용)
         updateAttackButtons();
       };
       config.anchor.onTargetLost = () => {
         log(`❌ ${config.name} 카드 사라짐`);
-        holoUniforms.forEach(u => {
-          u.reveal.value = 0.0;
-          u.scan.value = modelMinY - 0.1;
-        });
         pokemon.revealStartTime = -1;
         updateAttackButtons();
       };
@@ -676,28 +638,7 @@ async function startAR() {
           }
         }
 
-        // 홀로그램 등장 효과
-        if (p.revealStartTime > 0) {
-          const elapsed = (performance.now() - p.revealStartTime) / 1000;
-          const totalDuration = 2.0;
-
-          if (elapsed < totalDuration) {
-            const scanProgress = Math.min(1, elapsed / 1.5);
-            const scanY = p.modelMinY + (p.modelMaxY - p.modelMinY + 0.1) * scanProgress;
-            let revealValue = 0;
-            if (elapsed > 1.0) revealValue = Math.min(1, (elapsed - 1.0) / 1.0);
-
-            p.holoUniforms.forEach(u => {
-              u.scan.value = scanY;
-              u.reveal.value = revealValue;
-            });
-          } else {
-            p.holoUniforms.forEach(u => {
-              u.scan.value = p.modelMaxY + 1.0;
-              u.reveal.value = 1.0;
-            });
-          }
-        }
+        // 홀로그램 효과 제거됨 (단순 등장)
 
         // 오라
         if (p.aura) {
